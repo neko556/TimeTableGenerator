@@ -1,0 +1,2 @@
+calendar_id,academic_year,semester,semester_start,semester_end,holidays,exam_periods,teaching_days,status
+CAL001,2024-25,1,2024-07-15,2024-12-15,"Independence Day: 2024-08-15","2024-12-01 to 2024-12-14",120,Active
