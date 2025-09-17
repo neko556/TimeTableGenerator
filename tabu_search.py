@@ -1,197 +1,213 @@
+# tabu_search.py
+
 import copy
 import random
 import pandas as pd
 from collections import deque, defaultdict
 
 class TabuSearchTimetable:
-    def __init__(self, data, next_slot_map, tabu_tenure=10, max_iterations=30):
+    def __init__(self, data, next_slot_map,
+                 tabu_tenure=10, max_iterations=50,
+                 sid_scope=None,
+                 sid_to_course=None,
+                 allowed_slots_by_sid=None,
+                 fixed_assignments=None):  # list[(f,sid,t,r)]
         self.data = data
         self.next_slot_map = next_slot_map
-        self.tabu_list = deque(maxlen=tabu_tenure)
         self.max_iterations = max_iterations
+        self.tabu_attrs = deque(maxlen=2000)
 
-        # --- Pre-compute for speed (mirroring the GA's logic) ---
+        self.sid_scope = set(sid_scope or [])
+        self.sid_to_course = dict(sid_to_course or {})
+        self.allowed = allowed_slots_by_sid or {}
+        self.fixed_assignments = list(fixed_assignments or [])
+
         self.courses_df = self.data['courses']
-        self.student_choices_df = self.data['student_choices']
-        
-        self.course_student_map = self.student_choices_df.groupby('chosen_course_id')['student_id'].apply(list).to_dict()
+        self.data['time_slot_map'] = self.data.get('time_slot_map', {})
+        self.time_keys = list(self.data['time_slot_map'].keys())
+
+        base = pd.Series(1, index=self.courses_df.index)
+        self.course_details_map = pd.Series(base.values, index=self.courses_df['course_id']).to_dict()
+
+        sc = self.data['student_choices']
+        self.course_student_map = sc.groupby('chosen_course_id')['student_id'].apply(list).to_dict()
+
         self.expert_map = defaultdict(list)
         for _, row in self.data['faculty_expertise'].iterrows():
             self.expert_map[row['course_id']].append(row['faculty_id'])
-        self.course_details_map = pd.Series(
-            self.courses_df.duration_hours.values, 
-            index=self.courses_df.course_id
-        ).to_dict()
 
-    # --- Core Validity and Fitness Functions (Identical to GA) ---
+        self.fixed_busy = self._busy_from_fixed(self.fixed_assignments)
 
-    def get_required_slots(self, start_slot, duration):
-        """Gets a list of all slots for a class, or None if not possible."""
-        slots = [start_slot]
-        current_slot = start_slot
-        for _ in range(duration - 1):
-            next_slot = self.next_slot_map.get(current_slot)
-            if not next_slot: return None
-            slots.append(next_slot)
-            current_slot = next_slot
-        return slots
+    def _course(self, sid): return self.sid_to_course.get(sid, sid)
+
+    # tabu helpers
+    def is_tabu(self, move_attr, best_fitness, candidate_fitness):
+        return (move_attr in self.tabu_attrs) and not (candidate_fitness > best_fitness)
+    def add_tabu(self, move_attr): self.tabu_attrs.append(move_attr)
+
+    def best_soft_sids(self, solution, top_k=8):
+        contrib = []
+        base = self.fitness(solution)
+        for k in solution:
+            tmp = solution.copy(); del tmp[k]
+            contrib.append((base - self.fitness(tmp), k))
+        contrib.sort(reverse=True, key=lambda x: x[0])
+        return [k for _, k in contrib[:min(top_k, len(contrib))]]
+
+    # feasibility + score
+    def get_required_slots(self, start_slot, duration): return [start_slot]
+
+    def _busy_from_fixed(self, fixed):
+        busy = {'faculty': defaultdict(set), 'room': defaultdict(set), 'student': defaultdict(set)}
+        for f, sid, t, r in fixed:
+            c = self._course(sid)
+            for s in [t]:
+                busy['faculty'][f].add(s); busy['room'][r].add(s)
+                for stu in self.course_student_map.get(c, []):
+                    busy['student'][stu].add(s)
+        return busy
 
     def get_busy_map(self, individual):
-        """Builds a duration-aware busy map for all resources."""
-        busy_map = {'faculty': defaultdict(set), 'room': defaultdict(set), 'student': defaultdict(set)}
-        for f_id, c_id, t_slot, r_id in individual.keys():
-            duration = self.course_details_map.get(c_id, 1)
-            required_slots = self.get_required_slots(t_slot, duration)
-            if not required_slots: continue
-            students = self.course_student_map.get(c_id, [])
-            for slot in required_slots:
-                busy_map['faculty'][f_id].add(slot)
-                busy_map['room'][r_id].add(slot)
-                for s_id in students:
-                    busy_map['student'][s_id].add(slot)
-        return busy_map
+        busy = {'faculty': defaultdict(set), 'room': defaultdict(set), 'student': defaultdict(set)}
+        for res, d in self.fixed_busy.items():
+            for k, v in d.items(): busy[res][k] |= set(v)
+        for f, sid, t, r in individual.keys():
+            c = self._course(sid)
+            s = t
+            busy['faculty'][f].add(s); busy['room'][r].add(s)
+            for stu in self.course_student_map.get(c, []):
+                busy['student'][stu].add(s)
+        return busy
 
     def hard_constraint_violations(self, individual):
-        """The single source of truth for schedule validity."""
-        violations = 0
-        busy_map = defaultdict(list)
-        for f_id, c_id, t_slot, r_id in individual.keys():
-            duration = self.course_details_map.get(c_id, 1)
-            required_slots = self.get_required_slots(t_slot, duration)
-            if not required_slots: 
-                violations += 1; continue
-            students = self.course_student_map.get(c_id, [])
-            for slot in required_slots:
-                busy_map[('faculty', f_id, slot)].append(c_id)
-                busy_map[('room', r_id, slot)].append(c_id)
-                for s_id in students:
-                    busy_map[('student', s_id, slot)].append(c_id)
-        for assignments in busy_map.values():
-            violations += (len(assignments) - 1)
-        return -100000 * violations if violations > 0 else 0
-    
+        ledger = defaultdict(int)
+        for f, sid, t, r in self.fixed_assignments:
+            c = self._course(sid)
+            ledger[('f', f, t)] += 1; ledger[('r', r, t)] += 1
+            for stu in self.course_student_map.get(c, []): ledger[('s', stu, t)] += 1
+        for f, sid, t, r in individual.keys():
+            c = self._course(sid)
+            ledger[('f', f, t)] += 1; ledger[('r', r, t)] += 1
+            for stu in self.course_student_map.get(c, []): ledger[('s', stu, t)] += 1
+        v = 0
+        for cnt in ledger.values():
+            if cnt > 1: v += (cnt - 1)
+        return v
+
     def student_gap_score(self, individual):
-        """Calculates the soft constraint score for student gaps."""
-        student_schedules = defaultdict(lambda: defaultdict(list))
-        for _, c_id, t_slot, _ in individual.keys():
-            day = t_slot.split('_')[0]
-            for s_id in self.course_student_map.get(c_id, []):
-                student_schedules[s_id][day].append(int(t_slot.split('_')[1].split(':')[0]))
-        
-        total_gap_hours, total_student_days = 0, 0
-        for student, days in student_schedules.items():
-            for day, hours in days.items():
-                total_student_days += 1
+        schedules = defaultdict(lambda: defaultdict(list))
+        for _, sid, t, _ in individual.keys():
+            c = self._course(sid)
+            day = str(t).split('_', 1)[0]
+            hour = int(str(t).split('_', 1)[1].split(':')[0])
+            for s in self.course_student_map.get(c, []):
+                schedules[s][day].append(hour)
+        gaps, days = 0, 0
+        for _, days_map in schedules.items():
+            for _, hours in days_map.items():
+                days += 1
                 if len(hours) > 1:
                     hours.sort()
-                    duration = (hours[-1] - hours[0]) + 1
-                    total_gap_hours += (duration - len(hours))
-        
-        average_gap = total_gap_hours / total_student_days if total_student_days > 0 else 0
-        return 1 / (average_gap + 1)
-        
+                    gaps += (hours[-1] - hours[0] + 1) - len(hours)
+        avg_gap = gaps / days if days > 0 else 0.0
+        return 1.0 / (1.0 + avg_gap)
+
     def fitness(self, individual):
-        """The main fitness function, identical to the GA's."""
-        penalty = self.hard_constraint_violations(individual)
-        if penalty < 0:
-            return penalty
+        v = self.hard_constraint_violations(individual)
+        if v > 0: return -1000.0 * v
         return self.student_gap_score(individual)
-        
-    # --- Tabu Search Specific Logic ---
+
+    # neighborhoods
+    def _room_ok(self, c_id, r_row, group_size):
+        rtype = str(r_row.get('room_type', '')).lower()
+        cap = int(r_row.get('capacity', 0))
+        row = self.courses_df.loc[self.courses_df['course_id'] == c_id]
+        ctype = str(row['course_type'].iloc[0]).lower() if len(row) else ''
+        is_lab = 'lab' in ctype
+        return cap >= group_size and (('lab' in rtype) == is_lab)
 
     def neighborhood(self, solution):
-        """
-        Intelligent neighborhood generation: Finds all valid moves for a single course.
-        """
-        neighbors = []
-        # Create a list of all course assignments (keys) to choose from
-        all_assignments = list(solution.keys())
-        if not all_assignments:
-            return []
+        neigh = []
+        # movable filter
+        keys = [k for k in solution.keys() if (not self.sid_scope) or (k[1] in self.sid_scope)]
+        if not keys: keys = list(solution.keys())
+        ranked = self.best_soft_sids({k: True for k in keys}, top_k=8)
+        cand_keys = [k for k in ranked if k in solution] or keys
 
-        # Pick one random assignment to change
-        key_to_move = random.choice(all_assignments)
-        course_id_to_move = key_to_move[1]
-        
-        # Create a temporary solution without this course to find open slots
-        temp_solution = solution.copy()
-        del temp_solution[key_to_move]
-        
-        # Build a busy map based on the temporary solution
-        busy_map = self.get_busy_map(temp_solution)
-        
-        # Find all other valid places this course could go
-        # (This reuses the powerful logic from the GA)
-        students = self.course_student_map.get(course_id_to_move, [])
-        duration = self.course_details_map.get(course_id_to_move, 1)
+        rooms_df = self.data['rooms']
 
-        for f_id in self.expert_map.get(course_id_to_move, []):
-            for r_id in self.data['rooms']['room_id']:
-                for t_slot in self.data['time_slot_map'].keys():
-                    required_slots = self.get_required_slots(t_slot, duration)
-                    if not required_slots: continue
-                    
-                    is_valid = True
-                    for slot in required_slots:
-                        if slot in busy_map['faculty'].get(f_id, set()) or \
-                           slot in busy_map['room'].get(r_id, set()) or \
-                           any(slot in busy_map['student'].get(s_id, set()) for s_id in students):
-                            is_valid = False; break
-                    
-                    if is_valid:
-                        # Create a new neighbor solution for this valid move
-                        new_neighbor = temp_solution.copy()
-                        new_neighbor[(f_id, course_id_to_move, t_slot, r_id)] = True
-                        neighbors.append(new_neighbor)
-                        
-        return neighbors
-    
+        for key_to_move in cand_keys:
+            f0, sid0, t0, r0 = key_to_move
+            c0 = self._course(sid0)
+            tmp = solution.copy(); del tmp[key_to_move]
+            base_busy = self.get_busy_map(tmp)
+            studs0 = self.course_student_map.get(c0, [])
+            group_size0 = len(studs0)
+
+            # 1) Move sid0 within allowed windows
+            allowed_t0 = list(self.allowed.get(sid0, self.time_keys))
+            for _, r_row in rooms_df.iterrows():
+                if not self._room_ok(c0, r_row, group_size0): continue
+                r_id = r_row['room_id']
+                for t_new in allowed_t0:
+                    if t_new == t0: continue
+                    if (t_new in base_busy['room'].get(r_id, set()) or
+                        t_new in base_busy['faculty'].get(f0, set()) or
+                        any(t_new in base_busy['student'].get(sid, set()) for sid in studs0)):
+                        continue
+                    n = tmp.copy(); n[(f0, sid0, t_new, r_id)] = True
+                    neigh.append(('move', ('sid', sid0, 't', t_new), n))
+
+            # 2) Swap times with another movable sid (keep rooms/faculties)
+            for other in keys:
+                if other == key_to_move: continue
+                f1, sid1, t1, r1 = other
+                c1 = self._course(sid1)
+                # allowed windows check
+                if (t1 not in self.allowed.get(sid0, self.time_keys)) or (t0 not in self.allowed.get(sid1, self.time_keys)):
+                    continue
+                # room suitability
+                r0_row = rooms_df.loc[rooms_df['room_id'] == r0]
+                r1_row = rooms_df.loc[rooms_df['room_id'] == r1]
+                if r0_row.empty or r1_row.empty: continue
+                if not (self._room_ok(c0, r1_row.iloc[0], group_size0) and
+                        self._room_ok(c1, r0_row.iloc[0], len(self.course_student_map.get(c1, [])))):
+                    continue
+                # place sid0@t1,r1 with f0
+                conflict0 = (t1 in base_busy['room'].get(r1, set()) or
+                             t1 in base_busy['faculty'].get(f0, set()) or
+                             any(t1 in base_busy['student'].get(sid, set()) for sid in studs0))
+                if conflict0: continue
+                n = tmp.copy(); n[(f0, sid0, t1, r1)] = True
+                busy2 = self.get_busy_map(n)
+                studs1 = self.course_student_map.get(c1, [])
+                conflict1 = (t0 in busy2['room'].get(r0, set()) or
+                             t0 in busy2['faculty'].get(f1, set()) or
+                             any(t0 in busy2['student'].get(sid, set()) for sid in studs1))
+                if not conflict1:
+                    n[(f1, sid1, t0, r0)] = True
+                    neigh.append(('swap', ('sid0', sid0, 't1', t1, 'sid1', sid1, 't0', t0), n))
+
+        return neigh
+
     def run(self, initial_solution):
-        """
-        Run Tabu Search starting from the GA's best solution.
-        """
-        # Ensure the initial solution is a dictionary
-        if not isinstance(initial_solution, dict):
-            print("Tabu Error: Initial solution is not in the correct format.")
-            return initial_solution
-
-        current_solution = copy.deepcopy(initial_solution)
-        best_solution = current_solution
-        best_fitness = self.fitness(best_solution)
-
-        if best_fitness < 0:
-            print("Warning: Tabu search was given an invalid initial solution. It will try to repair it.")
-        
-        for iteration in range(self.max_iterations):
-            neighborhood = self.neighborhood(current_solution)
-            
-            # Filter out neighbors that are in the tabu list
-            # We convert the dict to a frozenset of items to make it hashable for the tabu list
-            neighborhood = [n for n in neighborhood if frozenset(n.items()) not in self.tabu_list]
-            
-            if not neighborhood:
-                # If no non-tabu moves, we are stuck. Could add more complex logic here.
-                break 
-            
-            neighbor_fitness_pairs = [(self.fitness(n), n) for n in neighborhood]
-            neighbor_fitness_pairs.sort(key=lambda x: x[0], reverse=True)
-            
-            best_neighbor_fitness, best_neighbor = neighbor_fitness_pairs[0]
-            
-            # Aspiration Criterion: if this move leads to the best-ever solution,
-            # accept it even if it's tabu (already handled by how we find best_neighbor)
-            if best_neighbor_fitness > best_fitness:
-                best_solution = best_neighbor
-                best_fitness = best_neighbor_fitness
-            
-            # Move to the best neighbor for the next iteration
-            current_solution = best_neighbor
-            
-            # Add the state of the new solution to the tabu list
-            self.tabu_list.append(frozenset(current_solution.items()))
-            
-            if iteration % 10 == 0:
-                print(f"Tabu Iteration {iteration+1}: Best Fitness = {best_fitness:.4f}")
-        
-        print("Tabu Search completed.")
-        return best_solution
+        current = copy.deepcopy(initial_solution)
+        best = current; best_fit = self.fitness(best)
+        for it in range(self.max_iterations):
+            cand = self.neighborhood(current)
+            if not cand: break
+            scored = []
+            for move_type, attr, sol in cand:
+                f = self.fitness(sol)
+                if not self.is_tabu(attr, best_fit, f):
+                    scored.append((f, move_type, attr, sol))
+            if not scored: break
+            scored.sort(key=lambda x: x[0], reverse=True)
+            f, move_type, attr, sel = scored[0]
+            current = sel
+            self.add_tabu(attr)
+            if f > best_fit:
+                best, best_fit = sel, f
+            if (it + 1) % 10 == 0:
+                print(f"Tabu Iter {it+1}: Best={best_fit:.4f}")
+        return best

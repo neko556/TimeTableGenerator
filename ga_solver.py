@@ -1,3 +1,5 @@
+# ga_solver.py
+
 import random
 import copy
 from collections import defaultdict
@@ -5,251 +7,279 @@ import pandas as pd
 import time
 
 class GeneticAlgorithmTimetable:
-    def __init__(self, data, next_slot_map, allowed_slots_by_course=None,
-                 population_size=24, generations=14, mutation_rate=0.35, crossover_rate=0.8):
+    """
+    Fast GA on a scoped set of sessions (sid_scope), with fixed sessions as occupancy.
+    - No faculty preferences; soft = student compactness.
+    - Feasible operators; durations clamped to 1 (post-opt).
+    - Allowed windows include seed time fallback to avoid empty pools.
+    """
+
+    def __init__(self, data, next_slot_map,
+                 population_size=24, generations=10,
+                 mutation_rate=0.35, crossover_rate=0.8,
+                 sid_scope=None,
+                 sid_to_course=None,
+                 fixed_assignments=None,            # list[(f,sid,t,r)]
+                 allowed_slots_by_sid=None,         # dict sid -> set(time)
+                 seed_schedule=None):               # dict {(f,sid,t,r): True}
         self.data = data
         self.next_slot_map = next_slot_map
         self.population_size = population_size
-        allowed_slots_by_course = allowed_slots_by_course or {}
         self.generations = generations
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
         self.population = []
 
-        # --- Pre-computation for Speed ---
+        self.sid_scope = list(sid_scope or [])
+        self.sid_to_course = dict(sid_to_course or {})
+        self.fixed_assignments = list(fixed_assignments or [])
+        self.allowed_slots_by_sid = allowed_slots_by_sid or {}
+        self.seed_schedule = dict(seed_schedule or {})
+
         print("\n--- Pre-computing GA data for optimization ---")
-        start_time = time.time()
+        t0 = time.time()
         self.courses_df = self.data['courses']
-        self.all_course_ids = self.courses_df['course_id'].tolist()
-        self.course_student_map = self.data['student_choices'].groupby('chosen_course_id')['student_id'].apply(list).to_dict()
+        base = pd.Series(1, index=self.courses_df.index)  # clamp to 1 slot
+        self.course_details_map = pd.Series(base.values, index=self.courses_df['course_id']).to_dict()
+        sc = self.data['student_choices']
+        self.course_student_map = sc.groupby('chosen_course_id')['student_id'].apply(list).to_dict()
         self.expert_map = defaultdict(list)
         for _, row in self.data['faculty_expertise'].iterrows():
             self.expert_map[row['course_id']].append(row['faculty_id'])
-        self.course_details_map = pd.Series(
-            self.courses_df.duration_hours.values,
-            index=self.courses_df.course_id
-        ).to_dict()
-        self.course_candidate_pool = self._precompute_candidate_pool()
-        print(f"Pre-computation completed in {time.time() - start_time:.2f} seconds.")
+        self.data['time_slot_map'] = self.data.get('time_slot_map', {})
+        self.time_keys = list(self.data['time_slot_map'].keys())
+        self.all_sids = sorted(self.sid_scope) if self.sid_scope else []
+        self.fixed_busy_map = self._busy_from_fixed(self.fixed_assignments)
+        # seed fallback window
+        for (f, sid, t, r) in self.seed_schedule.keys():
+            self.allowed_slots_by_sid.setdefault(sid, set()).add(t)
+        self.sid_candidate_pool = {}
+        print(f"Pre-computation completed in {time.time()-t0:.2f} seconds.")
+
+    def _course(self, sid):  # sid -> course_id
+        return self.sid_to_course.get(sid, sid)
+
+    def _busy_from_fixed(self, fixed):
+        busy = {'faculty': defaultdict(set), 'room': defaultdict(set), 'student': defaultdict(set)}
+        for f, sid, t, r in fixed:
+            c = self._course(sid)
+            students = self.course_student_map.get(c, [])
+            busy['faculty'][f].add(t); busy['room'][r].add(t)
+            for sid_stu in students: busy['student'][sid_stu].add(t)
+        return busy
 
     def _precompute_candidate_pool(self):
         pool = defaultdict(list)
         rooms_df = self.data['rooms']
-        time_keys = list(self.data['time_slot_map'].keys())
-        for course_id in self.all_course_ids:
-            num_students = len(self.course_student_map.get(course_id, []))
-            ctype = str(self.courses_df.loc[self.courses_df['course_id'] == course_id, 'course_type'].iloc[0]).lower()
+        for sid in self.all_sids:
+            c = self._course(sid)
+            n = len(self.course_student_map.get(c, []))
+            row = self.courses_df.loc[self.courses_df['course_id'] == c]
+            ctype = str(row['course_type'].iloc[0]).lower() if len(row) else ''
             is_lab = 'lab' in ctype
-            suitable_rooms = [
-                r['room_id'] for _, r in rooms_df.iterrows()
-                if int(r.get('capacity', 0)) >= num_students and
-                   (('lab' in str(r.get('room_type','')).lower()) == is_lab)
-            ]
-            allowed_t = list(self.allowed_slots_by_course.get(course_id, time_keys))
-            for f_id in self.expert_map.get(course_id, []):
-                for r_id in suitable_rooms:
+            suitable = []
+            for _, r in rooms_df.iterrows():
+                rtype = str(r.get('room_type', '')).lower()
+                cap = int(r.get('capacity', 0))
+                if cap >= n and (('lab' in rtype) == is_lab):
+                    suitable.append(r['room_id'])
+            allowed_t = list(self.allowed_slots_by_sid.get(sid, self.time_keys))
+            for f_id in self.expert_map.get(c, []):
+                for r_id in suitable:
                     for t_slot in allowed_t:
-                        pool[course_id].append((f_id, r_id, t_slot))
+                        pool[sid].append((f_id, sid, t_slot, r_id))
         return pool
 
     def initialize_population(self, initial_schedules):
         print("Initializing a diverse and valid GA population...")
-        self.population.append(self.create_valid_individual(initial_schedules[0]))
+        seed = initial_schedules[0] if initial_schedules else {}
+        if not self.all_sids:
+            self.all_sids = sorted({k[1] for k in seed.keys()})
+        if not self.all_sids:
+            self.population = [seed]; print("GA: Empty scope."); return
+        self.sid_candidate_pool = self._precompute_candidate_pool()
+        filtered_seed = {k: True for k in seed.keys() if k[1] in set(self.all_sids)}
+        self.population = [self.create_valid_individual(filtered_seed)]
         while len(self.population) < self.population_size:
             self.population.append(self.create_valid_individual({}))
         print(f"GA population initialized with {len(self.population)} individuals.")
 
-    def create_valid_individual(self, initial_assignments):
-        individual = initial_assignments.copy()
-        busy_map = self.get_busy_map(individual)
-        courses_to_place = [cid for cid in self.all_course_ids if cid not in [k[1] for k in individual.keys()]]
-        random.shuffle(courses_to_place)
-        for course_id in courses_to_place:
-            valid_placements = self.find_valid_placements(course_id, busy_map)
-            if valid_placements:
-                chosen = random.choice(valid_placements)
-                individual[chosen] = True
-                self.update_busy_map(busy_map, chosen)
-        return individual
+    # feasibility
+    def get_required_slots(self, start_slot, duration): return [start_slot]
 
-    def find_valid_placements(self, course_id, busy_map):
-        valid_placements = []
-        students = self.course_student_map.get(course_id, [])
-        duration = self.course_details_map.get(course_id, 1)
-        for (f_id, r_id, t_slot) in self.course_candidate_pool.get(course_id, []):
-            required_slots = self.get_required_slots(t_slot, duration)
-            if required_slots and self.is_placement_valid(f_id, r_id, students, required_slots, busy_map):
-                valid_placements.append((f_id, course_id, t_slot, r_id))
-        return valid_placements
-
-    def is_placement_valid(self, f_id, r_id, students, required_slots, busy_map):
-        for slot in required_slots:
-            if slot in busy_map['faculty'].get(f_id, set()) or \
-               slot in busy_map['room'].get(r_id, set()) or \
-               any(slot in busy_map['student'].get(s_id, set()) for s_id in students):
-                return False
-        return True
-
-    def get_required_slots(self, start_slot, duration):
-        slots = [start_slot]; current = start_slot
-        for _ in range(duration - 1):
-            current = self.next_slot_map.get(current)
-            if not current: return None
-            slots.append(current)
-        return slots
-        
     def get_busy_map(self, individual):
-        busy_map = {'faculty': defaultdict(set), 'room': defaultdict(set), 'student': defaultdict(set)}
-        for assignment in individual.keys(): self.update_busy_map(busy_map, assignment)
-        return busy_map
+        busy = {'faculty': defaultdict(set), 'room': defaultdict(set), 'student': defaultdict(set)}
+        for res, d in self.fixed_busy_map.items():
+            for k, v in d.items(): busy[res][k] |= set(v)
+        for (f, sid, t, r) in individual.keys():
+            c = self._course(sid)
+            students = self.course_student_map.get(c, [])
+            busy['faculty'][f].add(t); busy['room'][r].add(t)
+            for sid_stu in students: busy['student'][sid_stu].add(t)
+        return busy
 
     def update_busy_map(self, busy_map, assignment):
-        f, c, t, r = assignment
-        slots = self.get_required_slots(t, self.course_details_map.get(c, 1))
-        if not slots: return
+        f, sid, t, r = assignment
+        c = self._course(sid)
         students = self.course_student_map.get(c, [])
-        for s in slots:
-            busy_map['faculty'][f].add(s)
-            busy_map['room'][r].add(s)
-            for sid in students: busy_map['student'][sid].add(s)
+        busy_map['faculty'][f].add(t); busy_map['room'][r].add(t)
+        for sid_stu in students: busy_map['student'][sid_stu].add(t)
 
-    def fitness(self, individual):
-        if len(set(k[1] for k in individual.keys())) != len(self.all_course_ids): return -999999
-        violations = self.hard_constraint_violations(individual)
-        if violations > 0: return -100000 * violations
-        return self.student_gap_score(individual)
+    def is_placement_valid(self, f_id, r_id, students, slots, busy_map):
+        s = slots[0]
+        if s in busy_map['faculty'].get(f_id, set()): return False
+        if s in busy_map['room'].get(r_id, set()): return False
+        if any(s in busy_map['student'].get(sid, set()) for sid in students): return False
+        return True
 
+    def find_valid_placements(self, sid, busy_map):
+        vs = []
+        c = self._course(sid)
+        students = self.course_student_map.get(c, [])
+        for (f_id, _, t_slot, r_id) in self.sid_candidate_pool.get(sid, []):
+            if self.is_placement_valid(f_id, r_id, students, [t_slot], busy_map):
+                vs.append((f_id, sid, t_slot, r_id))
+        return vs
+
+    def create_valid_individual(self, initial_assignments):
+        individual = {}
+        for k in initial_assignments.keys():
+            if k[1] in set(self.all_sids):
+                individual[k] = True
+        busy_map = self.get_busy_map(individual)
+        placed = {k[1] for k in individual.keys()}
+        to_place = [sid for sid in self.all_sids if sid not in placed]
+        random.shuffle(to_place)
+        for sid in to_place:
+            cands = self.find_valid_placements(sid, busy_map)
+            if cands:
+                pick = random.choice(cands)
+                individual[pick] = True
+                self.update_busy_map(busy_map, pick)
+        return individual
+
+    # objective
     def hard_constraint_violations(self, individual):
-        violations = 0; busy_map = defaultdict(list)
-        for f, c, t, r in individual.keys():
-            slots = self.get_required_slots(t, self.course_details_map.get(c, 1))
-            if not slots: violations += 1; continue
-            students = self.course_student_map.get(c, [])
-            for s in slots:
-                busy_map[('f', f, s)].append(c); busy_map[('r', r, s)].append(c)
-                for sid in students: busy_map[('s', sid, s)].append(c)
-        for assignments in busy_map.values(): violations += (len(assignments) - 1)
-        return violations
-
-    def select_parents(self):
-        participants = random.sample(self.population, 5)
-        participants.sort(key=lambda ind: self.fitness(ind), reverse=True)
-        return participants[0], participants[1]
-
-    def crossover(self, parent1, parent2):
-        """
-        --- NEW: Greedy Crossover ---
-        Creates a child from the fitter parent, then tries to improve it
-        by intelligently incorporating genes from the second parent.
-        """
-        fitter_parent = parent1 if self.fitness(parent1) >= self.fitness(parent2) else parent2
-        weaker_parent = parent2 if self.fitness(parent1) >= self.fitness(parent2) else parent1
-        
-        child = fitter_parent.copy()
-        
-        # Try to incorporate better placements from the weaker parent
-        for key in weaker_parent:
-            course_id = key[1]
-            
-            # Find the corresponding course in the child
-            child_key = next((k for k in child if k[1] == course_id), None)
-            if not child_key: continue
-
-            # Create a temporary schedule to test the swap
-            temp_child = child.copy()
-            del temp_child[child_key] # Remove the old assignment
-            
-            # Check if the weaker parent's assignment is valid in this new context
-            temp_busy_map = self.get_busy_map(temp_child)
-            if self.is_placement_valid(key[0], key[3], self.course_student_map.get(course_id, []), self.get_required_slots(key[2], self.course_details_map.get(course_id, 1)), temp_busy_map):
-                temp_child[key] = True
-                # If the swap improved the score, keep it
-                if self.fitness(temp_child) > self.fitness(child):
-                    child = temp_child
-                    
-        return child
-
-    def mutate(self, individual):
-        """
-        --- NEW: Greedy Mutation ---
-        Moves a random course to the BEST possible new slot.
-        """
-        mutated_individual = individual.copy()
-        key_to_mutate = random.choice(list(mutated_individual.keys()))
-        course_id = key_to_mutate[1]
-        del mutated_individual[key_to_mutate]
-
-        busy_map = self.get_busy_map(mutated_individual)
-        valid_placements = self.find_valid_placements(course_id, busy_map)
-        
-        if valid_placements:
-            best_placement = None
-            best_fitness = -float('inf')
-            
-            # Find the placement that results in the highest fitness
-            for placement in valid_placements:
-                temp_individual = mutated_individual.copy()
-                temp_individual[placement] = True
-                current_fitness = self.fitness(temp_individual)
-                if current_fitness > best_fitness:
-                    best_fitness = current_fitness
-                    best_placement = placement
-            
-            if best_placement:
-                mutated_individual[best_placement] = True
-            else:
-                 mutated_individual[key_to_mutate] = True # Put it back
-        else:
-            mutated_individual[key_to_mutate] = True # Put it back
-
-        return mutated_individual
-
-    def run(self):
-        """Runs the GA with an early stopping criterion."""
-        if not self.population: return {}
-        best_overall = max(self.population, key=self.fitness)
-        best_fitness = self.fitness(best_overall)
-        patience, no_improvement_gens = 10, 0
-
-        for gen in range(self.generations):
-            new_population = [copy.deepcopy(best_overall)]
-            while len(new_population) < self.population_size:
-                p1, p2 = self.select_parents()
-                child = self.crossover(p1, p2)
-                if random.random() < self.mutation_rate: child = self.mutate(child)
-                new_population.append(child)
-            self.population = new_population
-            
-            current_best = max(self.population, key=self.fitness)
-            current_best_fitness = self.fitness(current_best)
-
-            if current_best_fitness > best_fitness:
-                best_fitness = current_best_fitness
-                best_overall = current_best
-                no_improvement_gens = 0
-                print(f"Generation {gen + 1}: New Best Fitness = {best_fitness:.4f}")
-            else:
-                no_improvement_gens += 1
-            
-            if no_improvement_gens >= patience:
-                print(f"Stopping early at generation {gen + 1}.")
-                break
-        
-        print(f"GA Completed: Best Fitness = {best_fitness:.4f}")
-        return best_overall
+        ledger = defaultdict(int)
+        for f, sid, t, r in self.fixed_assignments:
+            c = self._course(sid)
+            ledger[('f', f, t)] += 1; ledger[('r', r, t)] += 1
+            for sid_stu in self.course_student_map.get(c, []): ledger[('s', sid_stu, t)] += 1
+        for f, sid, t, r in individual.keys():
+            c = self._course(sid)
+            ledger[('f', f, t)] += 1; ledger[('r', r, t)] += 1
+            for sid_stu in self.course_student_map.get(c, []): ledger[('s', sid_stu, t)] += 1
+        v = 0
+        for cnt in ledger.values():
+            if cnt > 1: v += (cnt - 1)
+        return v
 
     def student_gap_score(self, individual):
         schedules = defaultdict(lambda: defaultdict(list))
-        for _, c, t, _ in individual.keys():
-            day = t.split('_')[0]
+        for _, sid, t, _ in individual.keys():
+            c = self._course(sid)
+            day = str(t).split('_', 1)[0]
+            hour = int(str(t).split('_', 1)[1].split(':')[0])
             for s in self.course_student_map.get(c, []):
-                schedules[s][day].append(int(t.split('_')[1].split(':')[0]))
-        gaps, days_with_class = 0, 0
-        for student, days in schedules.items():
-            for day, hours in days.items():
-                days_with_class += 1
+                schedules[s][day].append(hour)
+        gaps, days = 0, 0
+        for _, days_map in schedules.items():
+            for _, hours in days_map.items():
+                days += 1
                 if len(hours) > 1:
                     hours.sort()
                     gaps += (hours[-1] - hours[0] + 1) - len(hours)
-        avg_gap = gaps / days_with_class if days_with_class > 0 else 0
-        return 1 / (avg_gap + 1)
+        avg_gap = gaps / days if days > 0 else 0.0
+        return 1.0 / (1.0 + avg_gap)
+
+    def fitness(self, individual):
+        placed = {k[1] for k in individual.keys()}
+        missing = len(self.all_sids) - len(placed)
+        v = self.hard_constraint_violations(individual)
+        penalty = -1000.0 * v - 100.0 * missing
+        return penalty + self.student_gap_score(individual)
+
+    # operators
+    def select_parents(self):
+        k = min(3, len(self.population))
+        P = random.sample(self.population, k)
+        P.sort(key=lambda ind: self.fitness(ind), reverse=True)
+        return P[0], P[-1] if len(P) > 1 else P[0]
+
+    def crossover(self, p1, p2):
+        best = p1 if self.fitness(p1) >= self.fitness(p2) else p2
+        other = p2 if best is p1 else p1
+        child = {}
+        def insert_or_repair(gene, dest):
+            f,sid,t,r = gene
+            if any(k[1]==sid for k in dest): return True
+            tmp = dest.copy(); tmp[gene] = True
+            if self.fitness(tmp) > self.fitness(dest):
+                dest[gene] = True; return True
+            busy = self.get_busy_map(dest)
+            cands = self.find_valid_placements(sid, busy)
+            if cands:
+                sel = random.choice(cands)
+                tmp2 = dest.copy(); tmp2[sel] = True
+                if self.fitness(tmp2) >= self.fitness(dest):
+                    dest[sel] = True; return True
+            return False
+        for k in best.keys(): insert_or_repair(k, child)
+        for k in other.keys(): insert_or_repair(k, child)
+        have = {k[1] for k in child.keys()}
+        need = [sid for sid in self.all_sids if sid not in have]
+        busy = self.get_busy_map(child)
+        for sid in need:
+            cands = self.find_valid_placements(sid, busy)
+            if cands:
+                sel = random.choice(cands)
+                child[sel] = True
+                busy = self.get_busy_map(child)
+        return child
+
+    def mutate(self, individual, k_samples=15):
+        if not individual: return individual
+        mutated = individual.copy()
+        target = random.choice(list(mutated.keys()))
+        sid = target[1]
+        del mutated[target]
+        busy = self.get_busy_map(mutated)
+        cands = self.find_valid_placements(sid, busy)
+        if not cands:
+            mutated[target] = True; return mutated
+        sample = random.sample(cands, min(k_samples, len(cands)))
+        best, best_f = None, -1e18
+        for p in sample:
+            tmp = mutated.copy(); tmp[p] = True
+            fval = self.fitness(tmp)
+            if fval > best_f: best_f, best = fval, p
+        mutated[best if best else target] = True
+        return mutated
+
+    def run(self):
+        if not self.population:
+            return {}
+        best = max(self.population, key=self.fitness)
+        best_f = self.fitness(best)
+        patience, stall = 5, 0
+        for gen in range(self.generations):
+            new_pop = [copy.deepcopy(best)]
+            while len(new_pop) < self.population_size:
+                p1, p2 = self.select_parents()
+                child = self.crossover(p1, p2)
+                if random.random() < self.mutation_rate:
+                    child = self.mutate(child)
+                new_pop.append(child)
+            self.population = new_pop
+            cur = max(self.population, key=self.fitness)
+            cur_f = self.fitness(cur)
+            if cur_f > best_f:
+                best, best_f, stall = cur, cur_f, 0
+                print(f"Generation {gen+1}: New Best Fitness = {best_f:.4f}")
+            else:
+                stall += 1
+            if stall >= patience:
+                print(f"Stopping early at generation {gen+1}.")
+                break
+        print(f"GA Completed: Best Fitness = {best_f:.4f}")
+        return best
