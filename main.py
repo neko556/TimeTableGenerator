@@ -6,19 +6,15 @@ from collections import defaultdict, Counter
 from preprocessor import run_preprocessing_pipeline, build_elective_groups_from_data
 from sat_solver import BatchTimetableSATModel
 from time_slots import generate_time_slots
+from ga_solver import GeneticAlgorithmTimetable
+from tabu_search import TabuSearchTimetable
+import traceback
+
+GA_AVAILABLE = True
+TABU_AVAILABLE = True
 
 # Optional metaheuristics
-try:
-    from ga_solver import GeneticAlgorithmTimetable
-    GA_AVAILABLE = True
-except Exception:
-    GA_AVAILABLE = False
 
-try:
-    from tabu_search import TabuSearchTimetable
-    TABU_AVAILABLE = True
-except Exception:
-    TABU_AVAILABLE = False
 
 # Toggles for post-optimization stages
 RUN_GA = True
@@ -103,11 +99,6 @@ def student_gap_contrib_sid(assignments_sid, sid_to_course, course_student_map):
             worst = max(worst, span)
         contrib[sid] = max(contrib.get(sid, 0), worst)
     return contrib
-
-def build_movable_sid_scope(courses_df, sid_to_course, core_sid_assignments, elec_sid_assignments, top_k_core_sids=16):
-    # select theory core sids by worst compactness contribution; include all elective sids
-    # Compute student map outside and pass as arg; here we assume c->students map will be used later.
-    return None  # placeholder (we select below after we have student map)
 
 def build_allowed_windows_sid(time_slot_keys, core_reserved, elective_group_sessions, allowed_slots_per_group,
                               core_sids, sid_to_group):
@@ -239,7 +230,7 @@ def main():
             print("⚠ Elective scheduling returned no assignments; check [elective-domain] and [elective-zero] logs.")
 
     # --- Build session IDs (sid) for the current schedule ---
-    # Cores: create stable sids: CORE::{batch}::{course}::{k}
+    # Cores: CORE::{batch}::{course}::{k}
     core_sid_rows = []
     core_counters = defaultdict(int)
     for (f, c, t, r, b) in core_schedule:
@@ -248,7 +239,7 @@ def main():
         sid = f"CORE::{b}::{c}::{k}"
         core_sid_rows.append((sid, f, c, t, r, b))
 
-    # Electives: create sids from group/course enumeration: ELEC::{group}::{course}::{k}
+    # Electives: ELEC::{group}::{course}::{k}
     elec_sid_rows = []
     elec_counters = defaultdict(int)
     for (f, c, t, r, g) in elective_rows:
@@ -257,7 +248,7 @@ def main():
         sid = f"ELEC::{g}::{c}::{k}"
         elec_sid_rows.append((sid, f, c, t, r, g))
 
-    # sid -> course and sid -> group (for electives)
+    # sid maps
     sid_to_course = {}
     sid_to_group = {}
     for sid, f, c, t, r, b in core_sid_rows:
@@ -267,46 +258,64 @@ def main():
         sid_to_group[sid] = g
 
     # --- Phase 3: Memetic hybrid (session-level) ---
-    # Build allowed windows per sid
-    # Core sids: allowed = non-elective windows; Elective sids: allowed = group's allowed
     allowed_by_sid, all_slots_set, z_union = build_allowed_windows_sid(
         time_slot_map.keys(), core_reserved, elective_group_sessions, allowed_slots_per_group,
         core_sids=[sid for sid, *_ in core_sid_rows],
         sid_to_group=sid_to_group
     )
 
-    # Current assignments at sid-level
+    # Current sid assignments
     core_sid_assignments = [(f, sid, t, r) for (sid, f, c, t, r, b) in core_sid_rows]
     elec_sid_assignments = [(f, sid, t, r) for (sid, f, c, t, r, g) in elec_sid_rows]
     current_all_sid = core_sid_assignments + elec_sid_assignments
 
-    # Build student map
+    # Data for hotspot selection
     course_student_map = data['student_choices'].groupby('chosen_course_id')['student_id'].apply(list).to_dict()
-
-    # Rank sessions by soft contribution (compactness) and build movable sid scope
     sid_contrib = student_gap_contrib_sid(current_all_sid, sid_to_course, course_student_map)
-    # Select top theory core sids
+
+    # Select movable sids: top theory cores by contribution + all electives
     movable_core_sids = []
-    for (sid, f, t, r) in core_sid_assignments:
+    for (f, sid, t, r) in core_sid_assignments:
         c = sid_to_course.get(sid, sid)
         if not is_lab_course(data['courses'], c):
             movable_core_sids.append((sid, sid_contrib.get(sid, 0)))
     movable_core_sids.sort(key=lambda x: x[1], reverse=True)
     movable_core_sids = [sid for sid, _ in movable_core_sids[:16]]
-    # All elective sids movable
     movable_elec_sids = [sid for (f, sid, t, r) in elec_sid_assignments]
     movables_sid = sorted(set(movable_core_sids + movable_elec_sids))
 
     if movables_sid:
-        # Seed: only movable sids; Fixed: others
+        # Seed and fixed
         seed_sid = {(f, sid, t, r): True for (f, sid, t, r) in current_all_sid if sid in movables_sid}
         fixed_sid = [(f, sid, t, r) for (f, sid, t, r) in current_all_sid if sid not in movables_sid]
 
-        # Ensure each movable sid has its current slot in allowed
+        # Domain guard: ensure seed slot is allowed for each sid
         for (f, sid, t, r) in list(seed_sid.keys()):
             allowed_by_sid.setdefault(sid, set()).add(t)
+        empty_sids = [sid for sid in movables_sid if not allowed_by_sid.get(sid)]
+        if empty_sids:
+            print(f"[memetic][warn] sids with empty domain: {len(empty_sids)} -> auto-adding seed slots")
 
-        data['time_slot_map'] = time_slot_map
+        # Seed sanity before GA
+        if RUN_GA and GA_AVAILABLE and seed_sid:
+            try:
+                ga_dbg = GeneticAlgorithmTimetable(
+                    data=data,
+                    next_slot_map=next_slot_map,
+                    population_size=2, generations=1,
+                    mutation_rate=0.0, crossover_rate=0.0,
+                    sid_scope=movables_sid,
+                    sid_to_course=sid_to_course,
+                    fixed_assignments=fixed_sid,
+                    allowed_slots_by_sid=allowed_by_sid,
+                    seed_schedule=seed_sid
+                )
+                seed_ind = {k: True for k in seed_sid.keys()}
+                v = ga_dbg.hard_constraint_violations(seed_ind)
+                missing = len(movables_sid) - len({k[1] for k in seed_ind.keys()})
+                print(f"[memetic][seed] conflicts={v}, missing={missing}")
+            except Exception as e:
+                print(f"[warn] GA (memetic sid) seed check failed: {e}")
 
         # GA exploration (sid-scope)
         if RUN_GA and GA_AVAILABLE and seed_sid:
@@ -320,8 +329,8 @@ def main():
                     crossover_rate=0.8,
                     sid_scope=movables_sid,
                     sid_to_course=sid_to_course,
-                    fixed_assignments=fixed_sid,              # list of (f,sid,t,r)
-                    allowed_slots_by_sid=allowed_by_sid,      # dict sid->set
+                    fixed_assignments=fixed_sid,
+                    allowed_slots_by_sid=allowed_by_sid,
                     seed_schedule=seed_sid
                 )
                 ga.initialize_population([seed_sid])
@@ -335,7 +344,9 @@ def main():
         # Tabu intensification (sid-scope)
         if RUN_TABU and TABU_AVAILABLE:
             try:
-                combined = {(f, sid, t, r): True for (f, sid, t, r) in current_all_sid}
+                movable_dict = {(f, sid, t, r): True
+                                for (f, sid, t, r) in current_all_sid
+                                if sid in movables_sid}
                 tabu = TabuSearchTimetable(
                     data=data,
                     next_slot_map=next_slot_map,
@@ -344,17 +355,21 @@ def main():
                     sid_scope=set(movables_sid),
                     sid_to_course=sid_to_course,
                     allowed_slots_by_sid=allowed_by_sid,
-                    fixed_assignments=[(f, sid, t, r) for (f, sid, t, r) in current_all_sid if sid not in movables_sid]
+                    fixed_assignments=[(f, sid, t, r)
+                                    for (f, sid, t, r) in current_all_sid
+                                    if sid not in movables_sid]
                 )
-                improved = tabu.run(combined)
+                improved = tabu.run(movable_dict)
                 if isinstance(improved, dict) and len(improved) > 0:
-                    current_all_sid = list(improved.keys())
+                    # Merge fixed + improved movable
+                    current_all_sid = [(f, sid, t, r) for (f, sid, t, r) in current_all_sid if sid not in movables_sid]
+                    current_all_sid += list(improved.keys())
             except Exception as e:
-                print(f"[warn] Tabu (memetic sid) skipped due to error: {e}")
-
-        # Rebuild final schedule with original labels (batch/group) from sid maps
+        
+                print("[warn] Tabu (memetic sid) skipped:")
+                print(traceback.format_exc())
+        # Rebuild final schedule with original labels
         final_schedule_list = []
-        # Index original rows for label lookup
         core_sid_to_label = {sid: b for (sid, f, c, t, r, b) in core_sid_rows}
         elec_sid_to_label = {sid: g for (sid, f, c, t, r, g) in elec_sid_rows}
         for (f, sid, t, r) in current_all_sid:
@@ -366,7 +381,6 @@ def main():
                 g = elec_sid_to_label[sid]
                 final_schedule_list.append((f, c, t, r, g))
             else:
-                # Fallback (should not happen)
                 final_schedule_list.append((f, c, t, r, f"SID_{sid}"))
     else:
         print("[memetic] No movable sids selected; skipping memetic pass.")
@@ -388,6 +402,18 @@ def main():
     timetable_df['Day'] = pd.Categorical(timetable_df['Day'], categories=day_order, ordered=True)
     timetable_df = timetable_df.sort_values(by=['Day', 'Time', 'Room ID']).reset_index(drop=True)
     print(timetable_df.to_string())
+
+    # --- Faculty timetables (all) ---
+    print("\n--- ✅ Faculty Timetables (All) ---")
+    fac_day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    for fac_id in sorted(timetable_df['Faculty ID'].dropna().unique()):
+        fac_df = timetable_df[timetable_df['Faculty ID'] == fac_id].copy()
+        if fac_df.empty:
+            continue
+        fac_df['Day'] = pd.Categorical(fac_df['Day'], categories=fac_day_order, ordered=True)
+        fac_df = fac_df.sort_values(by=['Day', 'Time', 'Room ID']).reset_index(drop=True)
+        print(f"\n--- Timetable for Faculty: {fac_id} ---")
+        print(fac_df[['Day', 'Time', 'Course ID', 'Room ID', 'Batch/Group ID']].to_string(index=False))
 
     # --- Student lookup (core batch + elective groups) ---
     stud_to_elective_groups = {}

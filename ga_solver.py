@@ -8,10 +8,10 @@ import time
 
 class GeneticAlgorithmTimetable:
     """
-    Fast GA on a scoped set of sessions (sid_scope), with fixed sessions as occupancy.
-    - No faculty preferences; soft = student compactness.
-    - Feasible operators; durations clamped to 1 (post-opt).
-    - Allowed windows include seed time fallback to avoid empty pools.
+    Session-level GA (sid_scope) with fixed occupancy and faculty/room-only feasibility.
+    - No student no-overlap in feasibility (mirrors elective CP-SAT model).
+    - Soft objective = student compactness (student_gap_score).
+    - Seed-aware repair builds a feasible first individual to avoid negative wall scores.
     """
 
     def __init__(self, data, next_slot_map,
@@ -39,33 +39,40 @@ class GeneticAlgorithmTimetable:
         print("\n--- Pre-computing GA data for optimization ---")
         t0 = time.time()
         self.courses_df = self.data['courses']
-        base = pd.Series(1, index=self.courses_df.index)  # clamp to 1 slot
+        # clamp durations to 1 slot for post-optimization
+        base = pd.Series(1, index=self.courses_df.index)
         self.course_details_map = pd.Series(base.values, index=self.courses_df['course_id']).to_dict()
+
         sc = self.data['student_choices']
         self.course_student_map = sc.groupby('chosen_course_id')['student_id'].apply(list).to_dict()
+
         self.expert_map = defaultdict(list)
         for _, row in self.data['faculty_expertise'].iterrows():
             self.expert_map[row['course_id']].append(row['faculty_id'])
+
         self.data['time_slot_map'] = self.data.get('time_slot_map', {})
         self.time_keys = list(self.data['time_slot_map'].keys())
+
         self.all_sids = sorted(self.sid_scope) if self.sid_scope else []
         self.fixed_busy_map = self._busy_from_fixed(self.fixed_assignments)
-        # seed fallback window
+
+        # ensure seed time is in domain for each sid
         for (f, sid, t, r) in self.seed_schedule.keys():
             self.allowed_slots_by_sid.setdefault(sid, set()).add(t)
+
         self.sid_candidate_pool = {}
         print(f"Pre-computation completed in {time.time()-t0:.2f} seconds.")
 
+    # --------- helpers ---------
     def _course(self, sid):  # sid -> course_id
         return self.sid_to_course.get(sid, sid)
 
     def _busy_from_fixed(self, fixed):
-        busy = {'faculty': defaultdict(set), 'room': defaultdict(set), 'student': defaultdict(set)}
+        # faculty/room occupancy only
+        busy = {'faculty': defaultdict(set), 'room': defaultdict(set)}
         for f, sid, t, r in fixed:
-            c = self._course(sid)
-            students = self.course_student_map.get(c, [])
-            busy['faculty'][f].add(t); busy['room'][r].add(t)
-            for sid_stu in students: busy['student'][sid_stu].add(t)
+            busy['faculty'][f].add(t)
+            busy['room'][r].add(t)
         return busy
 
     def _precompute_candidate_pool(self):
@@ -90,91 +97,160 @@ class GeneticAlgorithmTimetable:
                         pool[sid].append((f_id, sid, t_slot, r_id))
         return pool
 
-    def initialize_population(self, initial_schedules):
-        print("Initializing a diverse and valid GA population...")
-        seed = initial_schedules[0] if initial_schedules else {}
-        if not self.all_sids:
-            self.all_sids = sorted({k[1] for k in seed.keys()})
-        if not self.all_sids:
-            self.population = [seed]; print("GA: Empty scope."); return
-        self.sid_candidate_pool = self._precompute_candidate_pool()
-        filtered_seed = {k: True for k in seed.keys() if k[1] in set(self.all_sids)}
-        self.population = [self.create_valid_individual(filtered_seed)]
-        while len(self.population) < self.population_size:
-            self.population.append(self.create_valid_individual({}))
-        print(f"GA population initialized with {len(self.population)} individuals.")
-
-    # feasibility
-    def get_required_slots(self, start_slot, duration): return [start_slot]
-
+    # --------- feasibility (faculty/room only) ---------
     def get_busy_map(self, individual):
-        busy = {'faculty': defaultdict(set), 'room': defaultdict(set), 'student': defaultdict(set)}
+        busy = {'faculty': defaultdict(set), 'room': defaultdict(set)}
+        # merge fixed
         for res, d in self.fixed_busy_map.items():
-            for k, v in d.items(): busy[res][k] |= set(v)
+            for k, v in d.items():
+                busy[res][k] |= set(v)
+        # add variable
         for (f, sid, t, r) in individual.keys():
-            c = self._course(sid)
-            students = self.course_student_map.get(c, [])
-            busy['faculty'][f].add(t); busy['room'][r].add(t)
-            for sid_stu in students: busy['student'][sid_stu].add(t)
+            busy['faculty'][f].add(t)
+            busy['room'][r].add(t)
         return busy
 
     def update_busy_map(self, busy_map, assignment):
         f, sid, t, r = assignment
-        c = self._course(sid)
-        students = self.course_student_map.get(c, [])
-        busy_map['faculty'][f].add(t); busy_map['room'][r].add(t)
-        for sid_stu in students: busy_map['student'][sid_stu].add(t)
+        busy_map['faculty'][f].add(t)
+        busy_map['room'][r].add(t)
 
-    def is_placement_valid(self, f_id, r_id, students, slots, busy_map):
-        s = slots[0]
-        if s in busy_map['faculty'].get(f_id, set()): return False
-        if s in busy_map['room'].get(r_id, set()): return False
-        if any(s in busy_map['student'].get(sid, set()) for sid in students): return False
+    def is_placement_valid(self, f_id, r_id, students_unused, slots, busy_map):
+        s = slots[0]  # 1-slot moves
+        if s in busy_map['faculty'].get(f_id, set()):
+            return False
+        if s in busy_map['room'].get(r_id, set()):
+            return False
+        # no student check (electives allow overlaps)
         return True
 
     def find_valid_placements(self, sid, busy_map):
         vs = []
         c = self._course(sid)
-        students = self.course_student_map.get(c, [])
         for (f_id, _, t_slot, r_id) in self.sid_candidate_pool.get(sid, []):
-            if self.is_placement_valid(f_id, r_id, students, [t_slot], busy_map):
+            if self.is_placement_valid(f_id, r_id, None, [t_slot], busy_map):
                 vs.append((f_id, sid, t_slot, r_id))
         return vs
+    def initialize_population(self, initial_schedules):
+            """
+            Create the initial GA population.
+            - initial_schedules: list with at least one dict {(f,sid,t,r): True} used as seed.
+            - If sid_scope was not provided, infer it from the seed.
+            - Build candidate pools once the scope is known.
+            - First individual is a repaired/feasible version of the seed; the rest are randomized feasible builds.
+            """
+            print("Initializing a diverse and valid GA population...")
+            seed = initial_schedules[0] if initial_schedules else {}
+            if not self.all_sids:
+                self.all_sids = sorted({k[1] for k in seed.keys()})
+            if not self.all_sids:
+                self.population = [seed]
+                print("GA: Empty scope.")
+                return
 
+            # Build candidate pool after scope is known
+            self.sid_candidate_pool = self._precompute_candidate_pool()
+
+            # Seeded, repaired individual
+            repaired = self.create_valid_individual(seed)
+            self.population = [repaired]
+
+            # Fill the rest with randomized feasible individuals
+            while len(self.population) < self.population_size:
+                self.population.append(self.create_valid_individual({}))
+
+            print(f"GA population initialized with {len(self.population)} individuals.")
+
+
+    # --------- build individual (with seed-aware repair) ---------
     def create_valid_individual(self, initial_assignments):
+        """
+        Build a feasible individual:
+        - start from fixed-only busy map,
+        - keep seed assignments if feasible vs fixed,
+        - then greedily place remaining sids,
+        - fallback: add seed slot into domain and rebuild candidates for a sid if empty,
+        - final safety: if still empty, place one feasible candidate.
+        """
         individual = {}
-        for k in initial_assignments.keys():
-            if k[1] in set(self.all_sids):
-                individual[k] = True
-        busy_map = self.get_busy_map(individual)
-        placed = {k[1] for k in individual.keys()}
-        to_place = [sid for sid in self.all_sids if sid not in placed]
+        busy_map = self.get_busy_map({})  # merges fixed only
+        seen_sids = set()
+
+        # 1) keep feasible seed genes
+        for (f, sid, t, r) in initial_assignments.keys():
+            if sid not in set(self.all_sids):
+                continue
+            if sid in seen_sids:
+                continue
+            if self.is_placement_valid(f, r, None, [t], busy_map):
+                individual[(f, sid, t, r)] = True
+                self.update_busy_map(busy_map, (f, sid, t, r))
+                seen_sids.add(sid)
+
+        # 2) place remaining sids
+        to_place = [sid for sid in self.all_sids if sid not in seen_sids]
         random.shuffle(to_place)
+        rooms_df = self.data['rooms']
         for sid in to_place:
             cands = self.find_valid_placements(sid, busy_map)
+            if not cands:
+                # fallback: add seed time and rebuild pool for this sid
+                for (f0, sid0, t0, r0) in initial_assignments.keys():
+                    if sid0 == sid:
+                        self.allowed_slots_by_sid.setdefault(sid, set()).add(t0)
+                        # rebuild candidates JUST for this sid
+                        self.sid_candidate_pool[sid] = []
+                        c = self._course(sid)
+                        n = len(self.course_student_map.get(c, []))
+                        row = self.courses_df.loc[self.courses_df['course_id'] == c]
+                        ctype = str(row['course_type'].iloc[0]).lower() if len(row) else ''
+                        is_lab = 'lab' in ctype
+                        for _, r in rooms_df.iterrows():
+                            rtype = str(r.get('room_type', '')).lower()
+                            cap = int(r.get('capacity', 0))
+                            if cap >= n and (('lab' in rtype) == is_lab):
+                                for f_id in self.expert_map.get(c, []):
+                                    for t_slot in list(self.allowed_slots_by_sid.get(sid, self.time_keys)):
+                                        self.sid_candidate_pool[sid].append((f_id, sid, t_slot, r['room_id']))
+                        cands = self.find_valid_placements(sid, busy_map)
+                        break
+
             if cands:
                 pick = random.choice(cands)
                 individual[pick] = True
                 self.update_busy_map(busy_map, pick)
+
+        # 3) final safety: ensure non-empty individual
+        if not individual and self.all_sids:
+            first_sid = self.all_sids[0]
+            busy_map2 = self.get_busy_map({})
+            cands2 = self.find_valid_placements(first_sid, busy_map2)
+            if cands2:
+                pick = random.choice(cands2)
+                individual[pick] = True
         return individual
 
-    # objective
+
+    # --------- objective ---------
     def hard_constraint_violations(self, individual):
+        # count faculty/room collisions only
         ledger = defaultdict(int)
         for f, sid, t, r in self.fixed_assignments:
-            c = self._course(sid)
-            ledger[('f', f, t)] += 1; ledger[('r', r, t)] += 1
-            for sid_stu in self.course_student_map.get(c, []): ledger[('s', sid_stu, t)] += 1
+            ledger[('f', f, t)] += 1
+            ledger[('r', r, t)] += 1
         for f, sid, t, r in individual.keys():
-            c = self._course(sid)
-            ledger[('f', f, t)] += 1; ledger[('r', r, t)] += 1
-            for sid_stu in self.course_student_map.get(c, []): ledger[('s', sid_stu, t)] += 1
+            ledger[('f', f, t)] += 1
+            ledger[('r', r, t)] += 1
         v = 0
         for cnt in ledger.values():
-            if cnt > 1: v += (cnt - 1)
+            if cnt > 1:
+                v += (cnt - 1)
         return v
 
     def student_gap_score(self, individual):
+        # soft compactness: no crash for empty or day-less schedules
+        if not individual:
+            return 0.0
         schedules = defaultdict(lambda: defaultdict(list))
         for _, sid, t, _ in individual.keys():
             c = self._course(sid)
@@ -185,21 +261,27 @@ class GeneticAlgorithmTimetable:
         gaps, days = 0, 0
         for _, days_map in schedules.items():
             for _, hours in days_map.items():
+                if not hours:
+                    continue
                 days += 1
                 if len(hours) > 1:
                     hours.sort()
                     gaps += (hours[-1] - hours[0] + 1) - len(hours)
-        avg_gap = gaps / days if days > 0 else 0.0
+        if days <= 0:
+            return 0.0
+        avg_gap = gaps / days
         return 1.0 / (1.0 + avg_gap)
-
     def fitness(self, individual):
+        # safe fitness for empty children
+        if not individual:
+            return -1e4
         placed = {k[1] for k in individual.keys()}
-        missing = len(self.all_sids) - len(placed)
+        missing = max(0, len(self.all_sids) - len(placed))
         v = self.hard_constraint_violations(individual)
         penalty = -1000.0 * v - 100.0 * missing
         return penalty + self.student_gap_score(individual)
 
-    # operators
+    # --------- operators ---------
     def select_parents(self):
         k = min(3, len(self.population))
         P = random.sample(self.population, k)
@@ -256,6 +338,7 @@ class GeneticAlgorithmTimetable:
         mutated[best if best else target] = True
         return mutated
 
+    # --------- loop ---------
     def run(self):
         if not self.population:
             return {}

@@ -80,18 +80,27 @@ class TabuSearchTimetable:
         return busy
 
     def hard_constraint_violations(self, individual):
+        # This function now only checks for faculty and room clashes,
+        # matching the logic of the Genetic Algorithm.
         ledger = defaultdict(int)
+        
+        # 1. Count fixed assignments (faculty and room only)
         for f, sid, t, r in self.fixed_assignments:
-            c = self._course(sid)
-            ledger[('f', f, t)] += 1; ledger[('r', r, t)] += 1
-            for stu in self.course_student_map.get(c, []): ledger[('s', stu, t)] += 1
+            ledger[('f', f, t)] += 1
+            ledger[('r', r, t)] += 1
+            # The student check that was here has been removed.
+
+        # 2. Count movable assignments (faculty and room only)
         for f, sid, t, r in individual.keys():
-            c = self._course(sid)
-            ledger[('f', f, t)] += 1; ledger[('r', r, t)] += 1
-            for stu in self.course_student_map.get(c, []): ledger[('s', stu, t)] += 1
+            ledger[('f', f, t)] += 1
+            ledger[('r', r, t)] += 1
+            # The student check that was here has been removed.
+
         v = 0
         for cnt in ledger.values():
-            if cnt > 1: v += (cnt - 1)
+            if cnt > 1:
+                v += (cnt - 1)
+                
         return v
 
     def student_gap_score(self, individual):
@@ -151,16 +160,16 @@ class TabuSearchTimetable:
                 r_id = r_row['room_id']
                 for t_new in allowed_t0:
                     if t_new == t0: continue
-                    if (t_new in base_busy['room'].get(r_id, set()) or
-                        t_new in base_busy['faculty'].get(f0, set()) or
-                        any(t_new in base_busy['student'].get(sid, set()) for sid in studs0)):
-                        continue
+                    if (t_new in base_busy['room'].get(r_id, set())) or (t_new in base_busy['faculty'].get(f0, set())):
+                            continue
+
                     n = tmp.copy(); n[(f0, sid0, t_new, r_id)] = True
                     neigh.append(('move', ('sid', sid0, 't', t_new), n))
 
             # 2) Swap times with another movable sid (keep rooms/faculties)
             for other in keys:
-                if other == key_to_move: continue
+                if other == key_to_move:
+                    continue
                 f1, sid1, t1, r1 = other
                 c1 = self._course(sid1)
                 # allowed windows check
@@ -169,24 +178,38 @@ class TabuSearchTimetable:
                 # room suitability
                 r0_row = rooms_df.loc[rooms_df['room_id'] == r0]
                 r1_row = rooms_df.loc[rooms_df['room_id'] == r1]
-                if r0_row.empty or r1_row.empty: continue
+                if r0_row.empty or r1_row.empty:
+                    continue
                 if not (self._room_ok(c0, r1_row.iloc[0], group_size0) and
                         self._room_ok(c1, r0_row.iloc[0], len(self.course_student_map.get(c1, [])))):
                     continue
+
+                # Start from solution with BOTH keys removed
+                n = solution.copy()
+                if key_to_move in n:
+                    del n[key_to_move]
+                if other in n:
+                    del n[other]
+
+                # Busy after removing both
+                base2 = self.get_busy_map(n)
+
                 # place sid0@t1,r1 with f0
-                conflict0 = (t1 in base_busy['room'].get(r1, set()) or
-                             t1 in base_busy['faculty'].get(f0, set()) or
-                             any(t1 in base_busy['student'].get(sid, set()) for sid in studs0))
-                if conflict0: continue
-                n = tmp.copy(); n[(f0, sid0, t1, r1)] = True
+                if (t1 in base2['room'].get(r1, set())) or (t1 in base2['faculty'].get(f0, set())):
+                    continue
+                n[(f0, sid0, t1, r1)] = True
+
+                # Busy after inserting first
                 busy2 = self.get_busy_map(n)
-                studs1 = self.course_student_map.get(c1, [])
-                conflict1 = (t0 in busy2['room'].get(r0, set()) or
-                             t0 in busy2['faculty'].get(f1, set()) or
-                             any(t0 in busy2['student'].get(sid, set()) for sid in studs1))
-                if not conflict1:
-                    n[(f1, sid1, t0, r0)] = True
-                    neigh.append(('swap', ('sid0', sid0, 't1', t1, 'sid1', sid1, 't0', t0), n))
+
+                # place sid1@t0,r0 with f1
+                if (t0 in busy2['room'].get(r0, set())) or (t0 in busy2['faculty'].get(f1, set())):
+                    # rollback first insertion to avoid accumulating partials
+                    del n[(f0, sid0, t1, r1)]
+                    continue
+
+                n[(f1, sid1, t0, r0)] = True
+                neigh.append(('swap', ('sid0', sid0, 't1', t1, 'sid1', sid1, 't0', t0), n))
 
         return neigh
 
