@@ -4,7 +4,7 @@ import pandas as pd
 from collections import deque, defaultdict
 
 class TabuSearchTimetable:
-    def __init__(self, data, next_slot_map, tabu_tenure=10, max_iterations=200):
+    def __init__(self, data, next_slot_map, tabu_tenure=10, max_iterations=30):
         self.data = data
         self.next_slot_map = next_slot_map
         self.tabu_list = deque(maxlen=tabu_tenure)

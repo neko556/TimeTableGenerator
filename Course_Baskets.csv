@@ -1,2 +1,2 @@
-basket_id,program_id,semester,required_credits
-BASKET_MAIN,BE-IT,1,18
+basket_id,program_id,semester
+BASKET_MAIN,BE-IT,1
