@@ -101,32 +101,28 @@ def main():
             faculty_schedule = final_schedule_df[final_schedule_df['Faculty ID'] == faculty_id]
             print(faculty_schedule[['Day', 'Time', 'Course ID', 'Room ID']].to_string(index=False))
 
-        # --- Display Consolidated Batch Timetables ---
-        # --- Display Consolidated Batch Timetables ---
         print("\n" + "="*40)
-        print("--- CONSOLIDATED BATCH TIMETABLES ---")
+        print("--- INDIVIDUAL STUDENT TIMETABLE ---")
         print("="*40)
 
-        for batch_id, students_in_this_batch in student_batches.items():
-            print(f"\n--- Timetable for Batch: {batch_id} ---")
-            print(f"Students in this batch: {', '.join(students_in_this_batch[:5])}... (Total: {len(students_in_this_batch)})")
-            
-            # Find all unique courses that students in this specific batch are registered for
-            all_student_choices = data['student_choices']
-            batch_choices = all_student_choices[all_student_choices['student_id'].isin(students_in_this_batch)]
-            courses_for_this_batch = batch_choices['chosen_course_id'].unique().tolist()
+        student_id = input("Enter Student ID to view their timetable: ").strip()
 
-            # Filter the final schedule DataFrame to show only the courses relevant to this batch
-            batch_schedule_df = final_schedule_df[
-                final_schedule_df['Course ID'].isin(courses_for_this_batch)
-            ].drop_duplicates().sort_values(by=['Day', 'Time'])
+        if student_id not in data['students']['student_id'].values:
+            print(f"❌ Student ID {student_id} not found.")
+        else:
+            # Get all chosen courses for this student
+            student_courses = data['student_choices'][data['student_choices']['student_id'] == student_id]['chosen_course_id'].unique().tolist()
             
-            if batch_schedule_df.empty:
-                print("No courses scheduled for this batch.")
+            # Filter timetable for these courses
+            student_schedule = final_schedule_df[final_schedule_df['Course ID'].isin(student_courses)]
+            
+            if student_schedule.empty:
+                print(f"No timetable found for Student {student_id}.")
             else:
-                print(batch_schedule_df[['Day', 'Time', 'Course ID', 'Faculty ID', 'Room ID']].to_string(index=False))
+                print(f"\n--- Timetable for Student: {student_id} ---")
+                print(student_schedule[['Day', 'Time', 'Course ID', 'Faculty ID', 'Room ID']].to_string(index=False))
     else:
-        print("\n❌ SAT solver failed. Could not find a valid schedule for core courses.")
+            print("\n❌ SAT solver failed. Could not find a valid schedule for core courses.")
 
 if __name__ == "__main__":
     main()
