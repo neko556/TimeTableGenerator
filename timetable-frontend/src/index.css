@@ -1,0 +1,2 @@
+@import "tailwindcss/theme";      /* ✅ brings in default theme (colors, spacing, etc.) */
+@import "tailwindcss/utilities";  /* ✅ utilities (bg-blue, text-red, etc.) */

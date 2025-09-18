@@ -1,8 +1,8 @@
 from flask import Flask, jsonify
 from main import main, get_student_timetable, set_solved_result  # include set_solved_result
-
+from flask_cors import CORS
 app = Flask(__name__)
-
+CORS(app)
 @app.route("/")
 def home():
     return jsonify({
