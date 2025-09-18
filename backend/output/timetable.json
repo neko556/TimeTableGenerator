@@ -1,0 +1,823 @@
+{
+  "timetable": [
+    {
+      "Faculty ID": "FAC017",
+      "Course ID": "CRS001",
+      "Time Slot": "Monday_10:00-11:00",
+      "Room ID": "ROOM002",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Monday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC022",
+      "Course ID": "CRS001",
+      "Time Slot": "Monday_10:00-11:00",
+      "Room ID": "ROOM008",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Monday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC012",
+      "Course ID": "CRS002",
+      "Time Slot": "Monday_10:00-11:00",
+      "Room ID": "ROOM009",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Monday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC016",
+      "Course ID": "CRS002",
+      "Time Slot": "Monday_11:00-12:00",
+      "Room ID": "ROOM007",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Monday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC017",
+      "Course ID": "CRS001",
+      "Time Slot": "Monday_11:00-12:00",
+      "Room ID": "ROOM016",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Monday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC022",
+      "Course ID": "CRS001",
+      "Time Slot": "Monday_13:00-14:00",
+      "Room ID": "ROOM002",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Monday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Monday_13:00-14:00",
+      "Room ID": "ROOM008",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Monday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC009",
+      "Course ID": "CRS007",
+      "Time Slot": "Monday_13:00-14:00",
+      "Room ID": "ROOM014",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Monday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC009",
+      "Course ID": "CRS007",
+      "Time Slot": "Monday_14:00-15:00",
+      "Room ID": "ROOM017",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Monday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC002",
+      "Course ID": "CRS007",
+      "Time Slot": "Monday_14:00-15:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Monday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Monday_15:00-16:00",
+      "Room ID": "ROOM007",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Monday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC012",
+      "Course ID": "CRS003",
+      "Time Slot": "Monday_15:00-16:00",
+      "Room ID": "ROOM016",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Monday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC008",
+      "Course ID": "CRS005",
+      "Time Slot": "Monday_16:00-17:00",
+      "Room ID": "ROOM002",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Monday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS003",
+      "Time Slot": "Monday_16:00-17:00",
+      "Room ID": "ROOM006",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Monday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC024",
+      "Course ID": "CRS001",
+      "Time Slot": "Tuesday_10:00-11:00",
+      "Room ID": "ROOM001",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Tuesday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Tuesday_10:00-11:00",
+      "Room ID": "ROOM018",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Tuesday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC012",
+      "Course ID": "CRS003",
+      "Time Slot": "Tuesday_10:00-11:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Tuesday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC016",
+      "Course ID": "CRS002",
+      "Time Slot": "Tuesday_11:00-12:00",
+      "Room ID": "ROOM001",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Tuesday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC009",
+      "Course ID": "CRS007",
+      "Time Slot": "Tuesday_11:00-12:00",
+      "Room ID": "ROOM013",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Tuesday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC024",
+      "Course ID": "CRS001",
+      "Time Slot": "Tuesday_11:00-12:00",
+      "Room ID": "ROOM016",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Tuesday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC003",
+      "Course ID": "CRS006",
+      "Time Slot": "Tuesday_11:00-12:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Tuesday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC020",
+      "Course ID": "CRS006",
+      "Time Slot": "Tuesday_13:00-14:00",
+      "Room ID": "ROOM003",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Tuesday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC003",
+      "Course ID": "CRS006",
+      "Time Slot": "Tuesday_13:00-14:00",
+      "Room ID": "ROOM014",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Tuesday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC008",
+      "Course ID": "CRS005",
+      "Time Slot": "Tuesday_13:00-14:00",
+      "Room ID": "ROOM022",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Tuesday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC031",
+      "Course ID": "CRS020",
+      "Time Slot": "Tuesday_14:00-15:00",
+      "Room ID": "ROOM008",
+      "Batch/Group ID": "Elective_CRS020",
+      "Day": "Tuesday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC014",
+      "Course ID": "CRS030",
+      "Time Slot": "Tuesday_14:00-15:00",
+      "Room ID": "ROOM018",
+      "Batch/Group ID": "Elective_CRS030",
+      "Day": "Tuesday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS010",
+      "Time Slot": "Tuesday_14:00-15:00",
+      "Room ID": "ROOM019",
+      "Batch/Group ID": "Elective_CRS010",
+      "Day": "Tuesday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Tuesday_15:00-16:00",
+      "Room ID": "ROOM001",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Tuesday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC012",
+      "Course ID": "CRS003",
+      "Time Slot": "Tuesday_15:00-16:00",
+      "Room ID": "ROOM016",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Tuesday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS007",
+      "Time Slot": "Tuesday_15:00-16:00",
+      "Room ID": "ROOM023",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Tuesday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS007",
+      "Time Slot": "Tuesday_16:00-17:00",
+      "Room ID": "ROOM018",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Tuesday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC009",
+      "Course ID": "CRS007",
+      "Time Slot": "Wednesday_10:00-11:00",
+      "Room ID": "ROOM007",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Wednesday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Wednesday_11:00-12:00",
+      "Room ID": "ROOM003",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Wednesday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC024",
+      "Course ID": "CRS007",
+      "Time Slot": "Wednesday_11:00-12:00",
+      "Room ID": "ROOM016",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Wednesday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC003",
+      "Course ID": "CRS006",
+      "Time Slot": "Wednesday_11:00-12:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Wednesday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC018",
+      "Course ID": "CRS005",
+      "Time Slot": "Wednesday_13:00-14:00",
+      "Room ID": "ROOM006",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Wednesday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS003",
+      "Time Slot": "Wednesday_13:00-14:00",
+      "Room ID": "ROOM012",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Wednesday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC018",
+      "Course ID": "CRS005",
+      "Time Slot": "Wednesday_14:00-15:00",
+      "Room ID": "ROOM016",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Wednesday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Wednesday_14:00-15:00",
+      "Room ID": "ROOM017",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Wednesday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS007",
+      "Time Slot": "Wednesday_15:00-16:00",
+      "Room ID": "ROOM014",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Wednesday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC002",
+      "Course ID": "CRS007",
+      "Time Slot": "Wednesday_15:00-16:00",
+      "Room ID": "ROOM017",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Wednesday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC017",
+      "Course ID": "CRS001",
+      "Time Slot": "Wednesday_15:00-16:00",
+      "Room ID": "ROOM022",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Wednesday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC012",
+      "Course ID": "CRS002",
+      "Time Slot": "Wednesday_16:00-17:00",
+      "Room ID": "ROOM003",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Wednesday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC018",
+      "Course ID": "CRS005",
+      "Time Slot": "Wednesday_16:00-17:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Wednesday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC029",
+      "Course ID": "CRS005",
+      "Time Slot": "Wednesday_16:00-17:00",
+      "Room ID": "ROOM023",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Wednesday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC019",
+      "Course ID": "CRS006",
+      "Time Slot": "Thursday_10:00-11:00",
+      "Room ID": "ROOM003",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Thursday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC016",
+      "Course ID": "CRS002",
+      "Time Slot": "Thursday_10:00-11:00",
+      "Room ID": "ROOM004",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Thursday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC029",
+      "Course ID": "CRS005",
+      "Time Slot": "Thursday_10:00-11:00",
+      "Room ID": "ROOM016",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Thursday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC027",
+      "Course ID": "CRS002",
+      "Time Slot": "Thursday_11:00-12:00",
+      "Room ID": "ROOM012",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Thursday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC002",
+      "Course ID": "CRS007",
+      "Time Slot": "Thursday_11:00-12:00",
+      "Room ID": "ROOM023",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Thursday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC020",
+      "Course ID": "CRS040-A",
+      "Time Slot": "Thursday_13:00-14:00",
+      "Room ID": "ROOM005",
+      "Batch/Group ID": "Elective_CRS040-A",
+      "Day": "Thursday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS030",
+      "Time Slot": "Thursday_13:00-14:00",
+      "Room ID": "ROOM008",
+      "Batch/Group ID": "Elective_CRS030",
+      "Day": "Thursday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC001",
+      "Course ID": "CRS010",
+      "Time Slot": "Thursday_13:00-14:00",
+      "Room ID": "ROOM009",
+      "Batch/Group ID": "Elective_CRS010",
+      "Day": "Thursday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS040-B",
+      "Time Slot": "Thursday_13:00-14:00",
+      "Room ID": "ROOM010",
+      "Batch/Group ID": "Elective_CRS040-B",
+      "Day": "Thursday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC027",
+      "Course ID": "CRS020",
+      "Time Slot": "Thursday_13:00-14:00",
+      "Room ID": "ROOM016",
+      "Batch/Group ID": "Elective_CRS020",
+      "Day": "Thursday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC022",
+      "Course ID": "CRS001",
+      "Time Slot": "Thursday_14:00-15:00",
+      "Room ID": "ROOM014",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Thursday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS007",
+      "Time Slot": "Thursday_14:00-15:00",
+      "Room ID": "ROOM022",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Thursday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS003",
+      "Time Slot": "Thursday_15:00-16:00",
+      "Room ID": "ROOM014",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Thursday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC002",
+      "Course ID": "CRS007",
+      "Time Slot": "Thursday_15:00-16:00",
+      "Room ID": "ROOM019",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Thursday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC003",
+      "Course ID": "CRS006",
+      "Time Slot": "Thursday_15:00-16:00",
+      "Room ID": "ROOM024",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Thursday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC018",
+      "Course ID": "CRS005",
+      "Time Slot": "Thursday_16:00-17:00",
+      "Room ID": "ROOM002",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Thursday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC017",
+      "Course ID": "CRS001",
+      "Time Slot": "Thursday_16:00-17:00",
+      "Room ID": "ROOM006",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Thursday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Thursday_16:00-17:00",
+      "Room ID": "ROOM011",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Thursday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC009",
+      "Course ID": "CRS007",
+      "Time Slot": "Thursday_16:00-17:00",
+      "Room ID": "ROOM013",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Thursday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC029",
+      "Course ID": "CRS005",
+      "Time Slot": "Friday_10:00-11:00",
+      "Room ID": "ROOM019",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Friday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC019",
+      "Course ID": "CRS006",
+      "Time Slot": "Friday_11:00-12:00",
+      "Room ID": "ROOM002",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Friday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS007",
+      "Time Slot": "Friday_11:00-12:00",
+      "Room ID": "ROOM022",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Friday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC022",
+      "Course ID": "CRS001",
+      "Time Slot": "Friday_13:00-14:00",
+      "Room ID": "ROOM006",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Friday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Friday_13:00-14:00",
+      "Room ID": "ROOM023",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Friday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC029",
+      "Course ID": "CRS005",
+      "Time Slot": "Friday_14:00-15:00",
+      "Room ID": "ROOM011",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Friday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC012",
+      "Course ID": "CRS002",
+      "Time Slot": "Friday_14:00-15:00",
+      "Room ID": "ROOM019",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Friday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC018",
+      "Course ID": "CRS005",
+      "Time Slot": "Friday_15:00-16:00",
+      "Room ID": "ROOM012",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Friday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC020",
+      "Course ID": "CRS006",
+      "Time Slot": "Friday_15:00-16:00",
+      "Room ID": "ROOM017",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Friday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC016",
+      "Course ID": "CRS002",
+      "Time Slot": "Friday_15:00-16:00",
+      "Room ID": "ROOM023",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Friday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC029",
+      "Course ID": "CRS005",
+      "Time Slot": "Friday_16:00-17:00",
+      "Room ID": "ROOM014",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Friday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC016",
+      "Course ID": "CRS002",
+      "Time Slot": "Friday_16:00-17:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Friday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC020",
+      "Course ID": "CRS006",
+      "Time Slot": "Saturday_10:00-11:00",
+      "Room ID": "ROOM018",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Saturday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC024",
+      "Course ID": "CRS007",
+      "Time Slot": "Saturday_10:00-11:00",
+      "Room ID": "ROOM024",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Saturday",
+      "Time": "10:00-11:00"
+    },
+    {
+      "Faculty ID": "FAC019",
+      "Course ID": "CRS006",
+      "Time Slot": "Saturday_11:00-12:00",
+      "Room ID": "ROOM022",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Saturday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Saturday_11:00-12:00",
+      "Room ID": "ROOM023",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Saturday",
+      "Time": "11:00-12:00"
+    },
+    {
+      "Faculty ID": "FAC012",
+      "Course ID": "CRS002",
+      "Time Slot": "Saturday_13:00-14:00",
+      "Room ID": "ROOM009",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Saturday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC027",
+      "Course ID": "CRS001",
+      "Time Slot": "Saturday_13:00-14:00",
+      "Room ID": "ROOM011",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Saturday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC022",
+      "Course ID": "CRS001",
+      "Time Slot": "Saturday_13:00-14:00",
+      "Room ID": "ROOM018",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Saturday",
+      "Time": "13:00-14:00"
+    },
+    {
+      "Faculty ID": "FAC011",
+      "Course ID": "CRS003",
+      "Time Slot": "Saturday_14:00-15:00",
+      "Room ID": "ROOM001",
+      "Batch/Group ID": "BE-IT_Sem1-A",
+      "Day": "Saturday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC003",
+      "Course ID": "CRS006",
+      "Time Slot": "Saturday_14:00-15:00",
+      "Room ID": "ROOM007",
+      "Batch/Group ID": "BE-IT_Sem1-C",
+      "Day": "Saturday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC016",
+      "Course ID": "CRS002",
+      "Time Slot": "Saturday_14:00-15:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "BE-IT_Sem1-B",
+      "Day": "Saturday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC020",
+      "Course ID": "CRS006",
+      "Time Slot": "Saturday_14:00-15:00",
+      "Room ID": "ROOM022",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Saturday",
+      "Time": "14:00-15:00"
+    },
+    {
+      "Faculty ID": "FAC027",
+      "Course ID": "CRS002",
+      "Time Slot": "Saturday_15:00-16:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "BE-IT_Sem1-D",
+      "Day": "Saturday",
+      "Time": "15:00-16:00"
+    },
+    {
+      "Faculty ID": "FAC005",
+      "Course ID": "CRS010",
+      "Time Slot": "Saturday_16:00-17:00",
+      "Room ID": "ROOM001",
+      "Batch/Group ID": "Elective_CRS010",
+      "Day": "Saturday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC014",
+      "Course ID": "CRS030",
+      "Time Slot": "Saturday_16:00-17:00",
+      "Room ID": "ROOM021",
+      "Batch/Group ID": "Elective_CRS030",
+      "Day": "Saturday",
+      "Time": "16:00-17:00"
+    },
+    {
+      "Faculty ID": "FAC001",
+      "Course ID": "CRS020",
+      "Time Slot": "Saturday_16:00-17:00",
+      "Room ID": "ROOM023",
+      "Batch/Group ID": "Elective_CRS020",
+      "Day": "Saturday",
+      "Time": "16:00-17:00"
+    }
+  ]
+}
