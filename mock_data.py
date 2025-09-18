@@ -5,116 +5,136 @@ from faker import Faker
 
 # --- Configuration ---
 NUM_STUDENTS = 200
-NUM_FACULTY = 35  # Increased resources
+NUM_FACULTY = 35
 NUM_COURSES = 40
-NUM_ROOMS = 25   # Increased resources
-FACULTY_SLOTS_PER_WEEK = 20  # Increased availability
+NUM_ROOMS = 25
+FACULTY_SLOTS_PER_WEEK = 20
 
-# New: uniform elective credits for Phase-1 reservation planning
-ELECTIVE_CREDITS = 3          # all open electives will use this value
+# Credits policy
+ELECTIVE_CREDITS = 3           # all electives use this value
 CORE_THEORY_CREDIT_CHOICES = [3, 4]
-LAB_CREDITS = 2               # labs count as 2 credits, modeled as 2 contiguous hours
+LAB_CREDITS = 2                # labs = 2 contiguous hours
 
 fake = Faker('en_IN')
 
 def run_mock_data_generation():
-    """Main orchestrator for generating a complete and solvable dataset."""
-    print("--- Generating Solvable Mock Data ---")
-    
+    print("--- Generating Solvable Mock Data (CORE + ELECTIVE baskets) ---")
+
     # --- Basic Dataframes ---
     students_df = pd.DataFrame([
         {'student_id': f'STU{i:04d}', 'program_id': 'BE-IT', 'current_semester': 1}
         for i in range(1, NUM_STUDENTS + 1)
     ])
     faculty_df = pd.DataFrame([{'faculty_id': f'FAC{i:03d}'} for i in range(1, NUM_FACULTY + 1)])
-    rooms_data = [
-        {
+
+    rooms_data = []
+    for i in range(1, NUM_ROOMS + 1):
+        is_lab_room = (i % 5 == 0)
+        rooms_data.append({
             'room_id': f'ROOM{i:03d}',
-            'room_type': 'Lab' if i % 5 == 0 else 'Classroom',
-            'capacity': random.randint(30, 45) if i % 5 == 0 else random.randint(65, 100)
-        }
-        for i in range(1, NUM_ROOMS + 1)
-    ]
+            'room_type': 'Lab' if is_lab_room else 'Classroom',
+            'capacity': random.randint(30, 45) if is_lab_room else random.randint(65, 100)
+        })
     rooms_df = pd.DataFrame(rooms_data)
 
     # --- Courses with uniform elective credits ---
     courses_data = []
     for i in range(1, NUM_COURSES + 1):
-        is_lab = i % 8 == 0
-        is_elective = i % 10 == 0
+        is_lab = (i % 8 == 0)
+        is_elective = (i % 10 == 0)  # roughly 4 electives among 40
 
         if is_lab:
             credits = LAB_CREDITS
-            duration_hours = 2  # contiguous double-slot lab
+            duration_hours = 2
         else:
-            if is_elective:
-                credits = ELECTIVE_CREDITS
-            else:
-                credits = random.choice(CORE_THEORY_CREDIT_CHOICES)
-            duration_hours = credits  # theory: 1 hour per credit (sessions created in preprocessing)
+            credits = ELECTIVE_CREDITS if is_elective else random.choice(CORE_THEORY_CREDIT_CHOICES)
+            duration_hours = credits
 
         courses_data.append({
             'course_id': f'CRS{i:03d}',
-            'course_type': 'Lab' if is_lab else 'Elective' if is_elective else 'Core',
+            'course_type': 'Lab' if is_lab else ('Elective' if is_elective else 'Core'),
             'credits': credits,
             'duration_hours': duration_hours,
             'max_size': 30 if is_lab else 100,
             'is_elective': is_elective
         })
     courses_df = pd.DataFrame(courses_data)
-    all_course_ids = courses_df['course_id'].tolist()
 
-    # --- Smaller, realistic curriculum basket (cores only for Phase 1) ---
+    # Identify specific ids we'll use for baskets (stable sample based on the above pattern)
     core_theory_for_basket = [f'CRS{i:03d}' for i in [1, 2, 3, 5, 6, 7]]
     core_labs_for_basket   = [f'CRS{i:03d}' for i in [8, 16]]
-    basket_courses_df = pd.DataFrame({
-        'basket_id': 'BASKET_MAIN',
-        'course_id': core_theory_for_basket + core_labs_for_basket
-    })
-    course_baskets_df = pd.DataFrame([{'basket_id': 'BASKET_MAIN', 'program_id': 'BE-IT', 'semester': 1}])
+    core_main_list = core_theory_for_basket + core_labs_for_basket
 
-    # --- Generate Choices, Expertise, Availability ---
-    student_choices_data = []
-    electives = courses_df[courses_df['is_elective'] == True]['course_id'].tolist()
+    # Electives list (only true electives)
+    elective_ids = courses_df[courses_df['is_elective'] == True]['course_id'].tolist()
+    # Pick 3–4 electives for Sem-1 offering
+    sem1_electives = elective_ids[:4] if len(elective_ids) >= 4 else elective_ids
+
+    # --- Basket_Courses: CORE + ELECTIVE baskets ---
+    basket_courses_rows = []
+    # CORE basket (mandatory curriculum)
+    for cid in core_main_list:
+        basket_courses_rows.append({'basket_id': 'BASKET_MAIN', 'course_id': cid})
+    # ELECTIVE basket for Sem-1
+    for cid in sem1_electives:
+        basket_courses_rows.append({'basket_id': 'BASKET_MAIN_ELECTIVE', 'course_id': cid})
+    basket_courses_df = pd.DataFrame(basket_courses_rows)
+
+    # --- Course_Baskets: add basket_type and elective_credits ---
+    # Compute core basket credits sum for consistency (not used for choices)
+    core_credits = int(courses_df[courses_df['course_id'].isin(core_main_list)]['credits'].sum())
+
+    course_baskets_df = pd.DataFrame([
+        {'basket_id': 'BASKET_MAIN', 'program_id': 'BE-IT', 'semester': 1, 'basket_type': 'CORE', 'elective_credits': core_credits},
+        {'basket_id': 'BASKET_MAIN_ELECTIVE', 'program_id': 'BE-IT', 'semester': 1, 'basket_type': 'ELECTIVE', 'elective_credits': ELECTIVE_CREDITS},
+        # Example future semester rows (left present for structure; can be adjusted/removed)
+        {'basket_id': 'BASKET_M1', 'program_id': 'BE-IT', 'semester': 3, 'basket_type': 'CORE', 'elective_credits': 0},
+        {'basket_id': 'BASKET_M1_ELECTIVE', 'program_id': 'BE-IT', 'semester': 3, 'basket_type': 'ELECTIVE', 'elective_credits': ELECTIVE_CREDITS},
+    ])
+
+    # --- Student choices: only electives (no choices for CORE baskets) ---
+    student_choices_rows = []
     for sid in students_df['student_id']:
-        # Each student takes all core courses + 1 elective (electives uniform credits now)
-        for cid in (core_theory_for_basket + core_labs_for_basket):
-            student_choices_data.append({'student_id': sid, 'chosen_course_id': cid})
-        student_choices_data.append({'student_id': sid, 'chosen_course_id': random.choice(electives)})
-    student_choices_df = pd.DataFrame(student_choices_data)
+        # Each student chooses exactly one elective from the Sem-1 elective basket
+        if sem1_electives:
+            student_choices_rows.append({'student_id': sid, 'basket_id': 'BASKET_MAIN_ELECTIVE', 'chosen_course_id': random.choice(sem1_electives)})
+    student_choices_df = pd.DataFrame(student_choices_rows)
 
-    expertise_data = []
-    for cid in all_course_ids:
-        for fid in random.sample(faculty_df['faculty_id'].tolist(), random.randint(2, 5)):
-            expertise_data.append({'faculty_id': fid, 'course_id': cid})
-    faculty_expertise_df = pd.DataFrame(expertise_data)
+    # --- Faculty expertise: multiple experts per course ---
+    expertise_rows = []
+    faculty_ids = faculty_df['faculty_id'].tolist()
+    for cid in courses_df['course_id']:
+        k = random.randint(2, 5)
+        for fid in random.sample(faculty_ids, k):
+            expertise_rows.append({'faculty_id': fid, 'course_id': cid})
+    faculty_expertise_df = pd.DataFrame(expertise_rows)
 
+    # --- Availability windows (coarse, wide availability) ---
     days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    possible_slots = [f"{day}_{h:02d}:00-{(h+1):02d}:00" for day in days for h in range(10, 17) if h != 12]
 
-    faculty_availability_data = []
+    faculty_availability_rows = []
     for fid in faculty_df['faculty_id']:
         for day in days:
-            faculty_availability_data.append({
+            faculty_availability_rows.append({
                 'faculty_id': fid,
                 'day_of_week': day,
                 'time_slot_start': '10:00',
                 'time_slot_end': '17:00',
                 'availability_type': 'Available'
             })
-    faculty_availability_df = pd.DataFrame(faculty_availability_data)
+    faculty_availability_df = pd.DataFrame(faculty_availability_rows)
 
-    room_availability_df = []
+    room_availability_rows = []
     for rid in rooms_df['room_id']:
         for day in days:
-            room_availability_df.append({
+            room_availability_rows.append({
                 'room_id': rid,
                 'day_of_week': day,
                 'time_slot_start': '10:00',
                 'time_slot_end': '17:00',
                 'availability_status': 'Available'
             })
-    room_availability_df = pd.DataFrame(room_availability_df)
+    room_availability_df = pd.DataFrame(room_availability_rows)
 
     # --- Save all to CSV ---
     students_df.to_csv('Students.csv', index=False)
@@ -128,7 +148,7 @@ def run_mock_data_generation():
     course_baskets_df.to_csv('Course_Baskets.csv', index=False)
     basket_courses_df.to_csv('Basket_Courses.csv', index=False)
 
-    print("  - Generated a new, solvable dataset with uniform elective credits.")
+    print("  - Generated dataset with CORE and ELECTIVE baskets (student choices only for electives).")
 
 if __name__ == '__main__':
     run_mock_data_generation()
