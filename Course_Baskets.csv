@@ -1,5 +1,2 @@
-basket_id,program_id,semester,basket_type,elective_credits
-BASKET_MAIN,BE-IT,1,CORE,27
-BASKET_MAIN_ELECTIVE,BE-IT,1,ELECTIVE,3
-BASKET_M1,BE-IT,3,CORE,0
-BASKET_M1_ELECTIVE,BE-IT,3,ELECTIVE,3
+basket_id,program_id,semester
+BASKET_MAIN,BE-IT,1

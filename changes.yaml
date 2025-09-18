@@ -1,0 +1,1 @@
+{ close_rooms: ["ROOM007@Wednesday_14:00-16:00"], faculty_absent: ["FAC012@Thursday"], rho: 0.2, availability_factor: 0.7, time_limit_core: 30, time_limit_repair: 20, workers: 8, freeze_percent: 0.9 

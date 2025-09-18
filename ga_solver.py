@@ -1,10 +1,12 @@
-# ga_solver.py
 
 import random
 import copy
 from collections import defaultdict
 import pandas as pd
 import time
+
+import math 
+
 
 class GeneticAlgorithmTimetable:
     """
@@ -19,15 +21,18 @@ class GeneticAlgorithmTimetable:
                  mutation_rate=0.35, crossover_rate=0.8,
                  sid_scope=None,
                  sid_to_course=None,
-                 fixed_assignments=None,            # list[(f,sid,t,r)]
-                 allowed_slots_by_sid=None,         # dict sid -> set(time)
-                 seed_schedule=None):               # dict {(f,sid,t,r): True}
+                 fixed_assignments=None,            
+                 allowed_slots_by_sid=None,   
+                             
+                 seed_schedule=None,
+                 soft_config=None):               
         self.data = data
         self.next_slot_map = next_slot_map
         self.population_size = population_size
         self.generations = generations
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
+        self.soft_cfg = dict(soft_config or {})
         self.population = []
 
         self.sid_scope = list(sid_scope or [])
@@ -272,15 +277,15 @@ class GeneticAlgorithmTimetable:
         avg_gap = gaps / days
         return 1.0 / (1.0 + avg_gap)
     def fitness(self, individual):
-        # safe fitness for empty children
-        if not individual:
-            return -1e4
-        placed = {k[1] for k in individual.keys()}
-        missing = max(0, len(self.all_sids) - len(placed))
+        # Keep existing hard feasibility check
         v = self.hard_constraint_violations(individual)
-        penalty = -1000.0 * v - 100.0 * missing
-        return penalty + self.student_gap_score(individual)
-
+        if v > 0:
+            return -1e9 * float(v)  # strong penalty for infeasible
+        # Align with CP-SAT soft objective (minimize penalty => maximize -penalty)
+        pen = soft_penalty(individual, self.soft_cfg, self.next_slot_map)
+        if not math.isfinite(pen):
+            return -1e9
+        return -float(pen)
     # --------- operators ---------
     def select_parents(self):
         k = min(3, len(self.population))
@@ -342,20 +347,49 @@ class GeneticAlgorithmTimetable:
     def run(self):
         if not self.population:
             return {}
-        best = max(self.population, key=self.fitness)
-        best_f = self.fitness(best)
+        import math
+
+        def safe_fit(ind):
+            f = self.fitness(ind)
+            return (-1e12 if (f is None or not math.isfinite(f)) else float(f))
+
+        def safe_max(pop):
+            # returns (best_individual, best_fitness_float) with finite fitness
+            scored = [(safe_fit(ind), ind) for ind in pop]
+            if not scored:
+                return {}, -1e12
+            scored.sort(key=lambda x: x[0], reverse=True)
+            return scored[0][1], scored[0][0]
+
+        # Seed best
+        best, best_f = safe_max(self.population)
         patience, stall = 5, 0
+
         for gen in range(self.generations):
             new_pop = [copy.deepcopy(best)]
             while len(new_pop) < self.population_size:
+                # Parent selection should also use safe fitness
                 p1, p2 = self.select_parents()
+                # Repair if parents are empty
+                if not p1 or not isinstance(p1, dict):
+                    p1 = best
+                if not p2 or not isinstance(p2, dict):
+                    p2 = best
                 child = self.crossover(p1, p2)
                 if random.random() < self.mutation_rate:
                     child = self.mutate(child)
                 new_pop.append(child)
-            self.population = new_pop
-            cur = max(self.population, key=self.fitness)
-            cur_f = self.fitness(cur)
+
+            # Keep only valid, finite-fitness individuals
+            self.population = [
+                ind for ind in new_pop
+                if safe_fit(ind) > -1e12
+            ]
+            if not self.population:
+                # fallback to best
+                self.population = [copy.deepcopy(best)]
+
+            cur, cur_f = safe_max(self.population)
             if cur_f > best_f:
                 best, best_f, stall = cur, cur_f, 0
                 print(f"Generation {gen+1}: New Best Fitness = {best_f:.4f}")
@@ -364,5 +398,6 @@ class GeneticAlgorithmTimetable:
             if stall >= patience:
                 print(f"Stopping early at generation {gen+1}.")
                 break
+
         print(f"GA Completed: Best Fitness = {best_f:.4f}")
         return best

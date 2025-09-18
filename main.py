@@ -9,9 +9,10 @@ from time_slots import generate_time_slots
 from ga_solver import GeneticAlgorithmTimetable
 from tabu_search import TabuSearchTimetable
 import traceback
-
-GA_AVAILABLE = True
-TABU_AVAILABLE = True
+import json
+from constraints_io import load_constraints
+GA_AVAILABLE = False
+TABU_AVAILABLE = False
 
 # Optional metaheuristics
 
@@ -24,6 +25,106 @@ RUN_TABU = True
 ELECTIVE_CREDITS = 3
 ELECTIVES_TAKEN = 1
 STRICT_CORE = True
+
+import pandas as pd
+
+def display_all_timetables(core_schedule, elec_schedule, core_batches, elective_groups):
+    """
+    Consolidates all display logic into a single, comprehensive function.
+    
+    1. Builds a clean DataFrame from the core and elective schedules.
+    2. Prints a master timetable of all assignments.
+    3. Prints individual timetables for each faculty, room, and batch/group.
+    4. Provides an interactive prompt to look up the timetable for any student.
+    """
+    
+    # 1. Combine schedule data and create the main DataFrame
+    full_schedule_data = core_schedule + elec_schedule
+    if not full_schedule_data:
+        print("\n[info] No assignments were made in the final schedule.")
+        return
+
+    try:
+        df = pd.DataFrame(full_schedule_data, columns=[
+            'Faculty ID', 'Course ID', 'Time Slot', 'Room ID', 'Batch/Group ID'
+        ])
+    except ValueError as e:
+        print(f"\n[error] Failed to create timetable DataFrame: {e}")
+        return
+
+    # 2. Helper function to parse 'Time Slot' into sortable columns
+    def parse_slot(slot_str):
+        try:
+            day, time = slot_str.split('_', 1)
+            return day, time
+        except (ValueError, AttributeError):
+            return "Unknown", "Unknown"
+
+    df[['Day', 'Time']] = df['Time Slot'].apply(lambda x: pd.Series(parse_slot(x)))
+    
+    # Define a consistent order for days of the week
+    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    df['Day'] = pd.Categorical(df['Day'], categories=day_order, ordered=True)
+
+    # --- 3. Master Timetable ---
+    print("\n--- ✅ Master Timetable (All Assignments) ---")
+    master_df = df.sort_values(by=['Day', 'Time', 'Room ID', 'Faculty ID']).reset_index(drop=True)
+    print(master_df[['Day', 'Time', 'Course ID', 'Room ID', 'Faculty ID', 'Batch/Group ID']].to_string(index=False))
+
+    # --- 4. Faculty Timetables ---
+    print("\n--- ✅ Faculty Timetables (All) ---")
+    for fac_id in sorted(df['Faculty ID'].dropna().unique()):
+        fac_df = df[df['Faculty ID'] == fac_id].sort_values(by=['Day', 'Time']).reset_index(drop=True)
+        print(f"\n--- Timetable for Faculty: {fac_id} ---")
+        print(fac_df[['Day', 'Time', 'Course ID', 'Room ID', 'Batch/Group ID']].to_string(index=False))
+
+    # --- 5. Room Timetables ---
+    print("\n--- ✅ Room Timetables (All) ---")
+    for room_id in sorted(df['Room ID'].dropna().unique()):
+        room_df = df[df['Room ID'] == room_id].sort_values(by=['Day', 'Time']).reset_index(drop=True)
+        print(f"\n--- Timetable for Room: {room_id} ---")
+        print(room_df[['Day', 'Time', 'Course ID', 'Faculty ID', 'Batch/Group ID']].to_string(index=False))
+
+    # --- 6. Batch/Group Timetables ---
+    print("\n--- ✅ Batch/Group Timetables (All) ---")
+    for batch_id in sorted(df['Batch/Group ID'].dropna().unique()):
+        batch_df = df[df['Batch/Group ID'] == batch_id].sort_values(by=['Day', 'Time']).reset_index(drop=True)
+        print(f"\n--- Timetable for Batch/Group: {batch_id} ---")
+        print(batch_df[['Day', 'Time', 'Course ID', 'Faculty ID', 'Room ID']].to_string(index=False))
+
+    # --- 7. Interactive Student Timetable Lookup ---
+    print("\n--- ✅ Student Timetable Lookup ---")
+    stud_to_elective_groups = {}
+    for g, members in elective_groups.items():
+        for s in members:
+            stud_to_elective_groups.setdefault(s, []).append(g)
+
+    while True:
+        print("\n" + "=" * 50)
+        student_id = input("Enter Student ID to view timetable (or type 'exit' to quit): ")
+        if student_id.strip().lower() == 'exit':
+            break
+
+        core_batch = next((name for name, students in core_batches.items() if student_id in students), None)
+        groups = stud_to_elective_groups.get(student_id, [])
+        
+        selection_ids = [core_batch] if core_batch else []
+        selection_ids.extend(groups)
+
+        if not selection_ids:
+            print(f"Student '{student_id}' not found in any core batch or elective group.")
+            continue
+
+        student_schedule_df = df[df['Batch/Group ID'].isin(selection_ids)].sort_values(by=['Day', 'Time'])
+        
+        print(f"\n--- Timetable for Student: {student_id} ---")
+        if student_schedule_df.empty:
+            print("No classes found for this student in the final schedule.")
+        else:
+            print(student_schedule_df[['Day', 'Time', 'Course ID', 'Faculty ID', 'Room ID']].to_string(index=False))
+
+
+    
 
 
 def compute_e_global_from_data(data, elective_ids=None, availability_by_slot=None, buffer_ratio=0.15, availability_factor=0.6):
@@ -152,6 +253,10 @@ def main():
     if total_core_sessions == 0:
         print("No core sessions generated; fix Basket_Courses/IDs before solving.")
         return
+    constraints = load_constraints("constraints.json")
+    hard_cfg = constraints.get("hard", {})
+    soft_cfg = constraints.get("soft", {})
+
 
     # --- Compute E_GLOBAL from data using the capacity-based formula ---
     elective_course_ids_from_groups = set()
@@ -181,7 +286,10 @@ def main():
     )
     core_schedule, occupied_slots, ok, core_reserved = core_solver.solve(
         time_limit=300,
-        global_elective_windows=E_GLOBAL
+        global_elective_windows=E_GLOBAL,
+        hard_cfg=hard_cfg,
+        soft_cfg=soft_cfg,
+        use_assumptions=False
     )
     if not ok or not core_schedule:
         print("\n❌ CRITICAL ERROR: Could not schedule the core courses or schedule is empty.")
@@ -215,14 +323,16 @@ def main():
     else:
         print("\n--- Scheduling Elective Sessions (Phase 2) ---")
         elec_schedule, occupied_slots2, ok2 = core_solver.solve_electives(
-            elective_groups=elective_groups,
-            elective_group_sessions=elective_group_sessions,
-            core_reserved=core_reserved,
-            core_batches=core_batches,
-            occupied_slots=occupied_slots,
-            time_limit=90,
-            allow_unscheduled=True
-        )
+        elective_groups=elective_groups,
+        elective_group_sessions=elective_group_sessions,
+        core_reserved=core_reserved,
+        core_batches=core_batches,
+        occupied_slots=occupied_slots,
+        time_limit=90,
+        allow_unscheduled=True,
+        hard_cfg=hard_cfg,
+        soft_cfg=soft_cfg
+    )
         if ok2 and elec_schedule:
             final_schedule_list += elec_schedule
             elective_rows = list(elec_schedule)
@@ -308,7 +418,7 @@ def main():
                     sid_to_course=sid_to_course,
                     fixed_assignments=fixed_sid,
                     allowed_slots_by_sid=allowed_by_sid,
-                    seed_schedule=seed_sid
+                    seed_schedule=seed_sid,
                 )
                 seed_ind = {k: True for k in seed_sid.keys()}
                 v = ga_dbg.hard_constraint_violations(seed_ind)
@@ -390,55 +500,13 @@ def main():
         print("\n❌ No schedule could be generated.")
         return
 
-    print("\n--- ✅ Master Timetable (Core + Electives) ---")
-    timetable_df = pd.DataFrame(
-        final_schedule_list,
-        columns=['Faculty ID', 'Course ID', 'Time Slot', 'Room ID', 'Batch/Group ID']
-    )
-    mask = timetable_df['Time Slot'].astype('string').str.contains('_', regex=False, na=False)
-    timetable_df = timetable_df[mask]
-    timetable_df[['Day', 'Time']] = timetable_df['Time Slot'].astype('string').str.split('_', n=1, expand=True)
-    day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    timetable_df['Day'] = pd.Categorical(timetable_df['Day'], categories=day_order, ordered=True)
-    timetable_df = timetable_df.sort_values(by=['Day', 'Time', 'Room ID']).reset_index(drop=True)
-    print(timetable_df.to_string())
+    
+    
+    display_all_timetables(core_schedule, elec_schedule, core_batches, elective_groups)
 
-    # --- Faculty timetables (all) ---
-    print("\n--- ✅ Faculty Timetables (All) ---")
-    fac_day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    for fac_id in sorted(timetable_df['Faculty ID'].dropna().unique()):
-        fac_df = timetable_df[timetable_df['Faculty ID'] == fac_id].copy()
-        if fac_df.empty:
-            continue
-        fac_df['Day'] = pd.Categorical(fac_df['Day'], categories=fac_day_order, ordered=True)
-        fac_df = fac_df.sort_values(by=['Day', 'Time', 'Room ID']).reset_index(drop=True)
-        print(f"\n--- Timetable for Faculty: {fac_id} ---")
-        print(fac_df[['Day', 'Time', 'Course ID', 'Room ID', 'Batch/Group ID']].to_string(index=False))
+   
 
-    # --- Student lookup (core batch + elective groups) ---
-    stud_to_elective_groups = {}
-    for g, members in elective_groups.items():
-        for s in members:
-            stud_to_elective_groups.setdefault(s, []).append(g)
-
-    while True:
-        print("\n" + "=" * 40)
-        student_id = input("Enter Student ID to view full timetable (or type 'exit' to quit): ")
-        if student_id.lower() == 'exit':
-            break
-        core_batch = next((name for name, students in core_batches.items() if student_id in students), None)
-        groups = stud_to_elective_groups.get(student_id, [])
-        selection_ids = [core_batch] if core_batch else []
-        selection_ids += groups
-        if not selection_ids:
-            print(f"Student {student_id} not found in any batch or elective group.")
-            continue
-        print(f"\n--- Timetable for Student: {student_id} ---")
-        student_schedule_df = timetable_df[timetable_df['Batch/Group ID'].isin(selection_ids)]
-        if student_schedule_df.empty:
-            print("No classes found for this student in the final schedule.")
-        else:
-            print(student_schedule_df[['Day', 'Time', 'Course ID', 'Faculty ID', 'Room ID']].to_string(index=False))
+   
 
 
 if __name__ == "__main__":
