@@ -2,36 +2,53 @@
   "hard": {
     "faculty_day_off": {
       "enabled": true,
-      "scope": { "faculty_ids": ["FAC001", "FAC003"] },
-      "params": { "days": ["Monday", "Wednesday"] }
-    },
-    "faculty_forbid_slots": {
-      "enabled": true,
-      "scope": { "faculty_ids": ["FAC002"] },
-      "params": { "forbid_slots": ["Tuesday_09:00-10:00", "Tuesday_10:00-11:00"] }
+      "scope": {
+        "faculty_ids": [
+          "FAC001"
+        ]
+      },
+      "params": {
+        "days": [
+          "Friday"
+        ]
+      }
     }
   },
   "soft": {
     "avoid_early_slot": {
       "enabled": true,
-      "params": { "early_slots": ["Monday_08:00-09:00"] },
-      "weight": 2.0
+      "weight": 2.0,
+      "params": {
+        "early_slots": [
+          "Monday_09:00-10:00",
+          "Tuesday_09:00-10:00",
+          "Wednesday_09:00-10:00",
+          "Thursday_09:00-10:00",
+          "Friday_09:00-10:00",
+          "Saturday_09:00-10:00"
+        ]
+      }
     },
     "avoid_last_slot": {
       "enabled": true,
-      "params": { "last_slot_by_day": ["Friday_17:00-18:00"] },
-      "weight": 1.0
-    },
-    "faculty_pref_hours": {
-      "enabled": true,
-      "scope": { "faculty_ids": ["FAC004"] },
-      "params": { "dispreferred": ["Thursday_13:00-14:00", "Thursday_14:00-15:00"] },
-      "weight": 3.0
+      "weight": 3.0,
+      "params": {
+        "last_slot_by_day": [
+          "Monday_16:00-17:00",
+          "Tuesday_16:00-17:00",
+          "Wednesday_16:00-17:00",
+          "Thursday_16:00-17:00",
+          "Friday_16:00-17:00",
+          "Saturday_16:00-17:00"
+        ]
+      }
     },
     "faculty_back_to_back": {
       "enabled": true,
-      "params": { "window": 2 },
-      "weight": 1.5
+      "weight": 1.5,
+      "params": {
+        "window": 2
+      }
     }
   }
 }

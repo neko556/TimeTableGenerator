@@ -4,7 +4,7 @@ import copy
 from collections import defaultdict
 import pandas as pd
 import time
-
+from scorer import soft_penalty
 import math 
 
 
@@ -22,10 +22,10 @@ class GeneticAlgorithmTimetable:
                  sid_scope=None,
                  sid_to_course=None,
                  fixed_assignments=None,            
-                 allowed_slots_by_sid=None,   
-                             
+                 allowed_slots_by_sid=None,             
                  seed_schedule=None,
-                 soft_config=None):               
+                 soft_config=None,
+                 forbidden_by_faculty=None):               
         self.data = data
         self.next_slot_map = next_slot_map
         self.population_size = population_size
@@ -34,13 +34,15 @@ class GeneticAlgorithmTimetable:
         self.crossover_rate = crossover_rate
         self.soft_cfg = dict(soft_config or {})
         self.population = []
+        self.forbidden_by_faculty = {k: set(v) for k, v in (forbidden_by_faculty or {}).items()}
+
 
         self.sid_scope = list(sid_scope or [])
         self.sid_to_course = dict(sid_to_course or {})
         self.fixed_assignments = list(fixed_assignments or [])
         self.allowed_slots_by_sid = allowed_slots_by_sid or {}
         self.seed_schedule = dict(seed_schedule or {})
-
+        
         print("\n--- Pre-computing GA data for optimization ---")
         t0 = time.time()
         self.courses_df = self.data['courses']
@@ -97,9 +99,13 @@ class GeneticAlgorithmTimetable:
                     suitable.append(r['room_id'])
             allowed_t = list(self.allowed_slots_by_sid.get(sid, self.time_keys))
             for f_id in self.expert_map.get(c, []):
+                forbid = self.forbidden_by_faculty.get(f_id, set())
                 for r_id in suitable:
                     for t_slot in allowed_t:
+                        if t_slot in forbid: 
+                            continue
                         pool[sid].append((f_id, sid, t_slot, r_id))
+
         return pool
 
     # --------- feasibility (faculty/room only) ---------
@@ -121,7 +127,13 @@ class GeneticAlgorithmTimetable:
         busy_map['room'][r].add(t)
 
     def is_placement_valid(self, f_id, r_id, students_unused, slots, busy_map):
-        s = slots[0]  # 1-slot moves
+        forbid = self.forbidden_by_faculty.get(f_id, set())
+        s = slots[0] 
+
+        if s in forbid: 
+            return False
+    
+        
         if s in busy_map['faculty'].get(f_id, set()):
             return False
         if s in busy_map['room'].get(r_id, set()):
@@ -277,15 +289,11 @@ class GeneticAlgorithmTimetable:
         avg_gap = gaps / days
         return 1.0 / (1.0 + avg_gap)
     def fitness(self, individual):
-        # Keep existing hard feasibility check
         v = self.hard_constraint_violations(individual)
-        if v > 0:
-            return -1e9 * float(v)  # strong penalty for infeasible
-        # Align with CP-SAT soft objective (minimize penalty => maximize -penalty)
-        pen = soft_penalty(individual, self.soft_cfg, self.next_slot_map)
-        if not math.isfinite(pen):
-            return -1e9
+        if v > 0: return -1e9 * float(v)
+        pen = soft_penalty(individual, self.soft_cfg, self.next_slot_map, sid_to_course=self.sid_to_course)
         return -float(pen)
+
     # --------- operators ---------
     def select_parents(self):
         k = min(3, len(self.population))
@@ -341,7 +349,54 @@ class GeneticAlgorithmTimetable:
             fval = self.fitness(tmp)
             if fval > best_f: best_f, best = fval, p
         mutated[best if best else target] = True
+
         return mutated
+    def soft_penalty(individual, soft_cfg, next_slot_map, sid_to_course=None):
+        # individual: dict[(f,sid,t,r)] -> True
+        # Build per-faculty occupancy by slot
+        fac_slots = defaultdict(set)
+        for (f, sid, t, r) in individual.keys():
+            fac_slots[f].add(t)
+
+        pen = 0.0
+
+        # avoid_early_slot
+        se = soft_cfg.get('avoid_early_slot', {})
+        if se.get('enabled'):
+            early = se.get('slots', set()); w = se.get('w', 2.0)
+            for (f, sid, t, r) in individual.keys():
+                if t in early: pen += w
+
+        # avoid_last_slot
+        sl = soft_cfg.get('avoid_last_slot', {})
+        if sl.get('enabled'):
+            last = sl.get('slots', set()); w = sl.get('w', 1.0)
+            for (f, sid, t, r) in individual.keys():
+                if t in last: pen += w
+
+        # faculty_pref_hours (dispreferred times)
+        fp = soft_cfg.get('faculty_pref_hours', {})
+        if fp.get('enabled'):
+            bad = fp.get('dispreferred', set())
+            scope = fp.get('scope_fids', set())
+            w = fp.get('w', 2.0)
+            for (f, sid, t, r) in individual.keys():
+                if (not scope or f in scope) and (t in bad):
+                    pen += w
+
+        # faculty_back_to_back: count adjacent occupancies
+        fb = soft_cfg.get('faculty_back_to_back', {})
+        if fb.get('enabled'):
+            w = fb.get('w', 1.5); W = max(2, int(fb.get('window', 2)))
+            for f, slots in fac_slots.items():
+                for t in list(slots):
+                    nxt = t
+                    for _ in range(W - 1):
+                        nxt = next_slot_map.get(nxt)
+                        if nxt is None: break
+                        if nxt in slots: pen += w
+        return pen
+
 
     # --------- loop ---------
     def run(self):

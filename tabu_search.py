@@ -4,6 +4,7 @@ import copy
 import random
 import pandas as pd
 from collections import deque, defaultdict
+from scorer import soft_penalty
 
 class TabuSearchTimetable:
     def __init__(self, data, next_slot_map,
@@ -11,7 +12,8 @@ class TabuSearchTimetable:
                  sid_scope=None,
                  sid_to_course=None,
                  allowed_slots_by_sid=None,
-                 fixed_assignments=None):  # list[(f,sid,t,r)]
+                 fixed_assignments=None,
+                 soft_config=None, forbidden_by_faculty=None):  
         self.data = data
         self.next_slot_map = next_slot_map
         self.max_iterations = max_iterations
@@ -31,6 +33,8 @@ class TabuSearchTimetable:
 
         sc = self.data['student_choices']
         self.course_student_map = sc.groupby('chosen_course_id')['student_id'].apply(list).to_dict()
+        self.soft_cfg = dict(soft_config or {})
+        self.forbidden_by_faculty = {k: set(v) for k, v in (forbidden_by_faculty or {}).items()}
 
         self.expert_map = defaultdict(list)
         for _, row in self.data['faculty_expertise'].iterrows():
@@ -124,7 +128,8 @@ class TabuSearchTimetable:
     def fitness(self, individual):
         v = self.hard_constraint_violations(individual)
         if v > 0: return -1000.0 * v
-        return self.student_gap_score(individual)
+        pen = soft_penalty(individual, self.soft_cfg, self.next_slot_map, sid_to_course=self.sid_to_course)
+        return -float(pen)
 
     # neighborhoods
     def _room_ok(self, c_id, r_row, group_size):

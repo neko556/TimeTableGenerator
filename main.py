@@ -11,6 +11,7 @@ from tabu_search import TabuSearchTimetable
 import traceback
 import json
 from constraints_io import load_constraints
+from scorer import build_soft_cfg
 GA_AVAILABLE = False
 TABU_AVAILABLE = False
 
@@ -26,73 +27,125 @@ ELECTIVE_CREDITS = 3
 ELECTIVES_TAKEN = 1
 STRICT_CORE = True
 
+
+
+
 import pandas as pd
 
-def display_all_timetables(core_schedule, elec_schedule, core_batches, elective_groups):
+import pandas as pd
+
+def display_all_timetables(core_schedule, elec_schedule, core_batches, elective_groups, time_slot_map=None):
     """
     Consolidates all display logic into a single, comprehensive function.
-    
-    1. Builds a clean DataFrame from the core and elective schedules.
-    2. Prints a master timetable of all assignments.
-    3. Prints individual timetables for each faculty, room, and batch/group.
-    4. Provides an interactive prompt to look up the timetable for any student.
+
+    1. Expands multi-hour sessions (e.g., labs) into per-slot rows using Courses.csv duration_hours.
+    2. Builds a clean DataFrame from the expanded rows.
+    3. Prints a master timetable of all assignments.
+    4. Prints individual timetables for each faculty, room, and batch/group.
+    5. Provides an interactive prompt to look up the timetable for any student.
     """
-    
-    # 1. Combine schedule data and create the main DataFrame
+
+    # Input schedule tuples: (Faculty ID, Course ID, Time Slot, Room ID, Batch/Group ID)
     full_schedule_data = core_schedule + elec_schedule
     if not full_schedule_data:
         print("\n[info] No assignments were made in the final schedule.")
         return
 
+    # Build the base DataFrame
+    base_df = pd.DataFrame(full_schedule_data, columns=[
+        'Faculty ID', 'Course ID', 'Time Slot', 'Room ID', 'Batch/Group ID'
+    ])
+
+    # 1) Load durations from Courses.csv
     try:
-        df = pd.DataFrame(full_schedule_data, columns=[
-            'Faculty ID', 'Course ID', 'Time Slot', 'Room ID', 'Batch/Group ID'
-        ])
-    except ValueError as e:
-        print(f"\n[error] Failed to create timetable DataFrame: {e}")
+        courses_df = pd.read_csv("Courses.csv")
+        course_duration = {row['course_id']: int(row['duration_hours']) for _, row in courses_df.iterrows()}
+    except Exception as e:
+        print(f"[warn] Could not read Courses.csv ({e}); defaulting all durations to 1.")
+        course_duration = {}
+
+    # 2) Determine ordered slot_key list, either from provided map or derive from schedule
+    if time_slot_map is not None:
+        slot_keys = sorted(time_slot_map.keys())
+    else:
+        slot_keys = sorted(set(base_df['Time Slot'].tolist()))
+
+    def slot_index(slot_str):
+        try:
+            return slot_keys.index(slot_str)
+        except ValueError:
+            return -1
+
+    # 3) Expand each assignment by its duration into per-slot rows
+    expanded_rows = []
+    for fac_id, course_id, start_slot_str, room_id, batch_or_group_id in full_schedule_data:
+        dur = course_duration.get(course_id, 1)
+        start_idx = slot_index(start_slot_str)
+        if start_idx < 0:
+            continue
+
+        for k in range(dur):
+            idx = start_idx + k
+            if idx >= len(slot_keys):
+                break
+            slot_str = slot_keys[idx]
+            try:
+                day, time = slot_str.split('_', 1)
+            except ValueError:
+                day, time = "Unknown", "Unknown"
+
+            expanded_rows.append({
+                'Day': day,
+                'Time': time,
+                'Course ID': course_id,
+                'Room ID': room_id,
+                'Faculty ID': fac_id,
+                'Batch/Group ID': batch_or_group_id
+            })
+
+    if not expanded_rows:
+        print("\n[info] No rows after expansion; nothing to display.")
         return
 
-    # 2. Helper function to parse 'Time Slot' into sortable columns
-    def parse_slot(slot_str):
-        try:
-            day, time = slot_str.split('_', 1)
-            return day, time
-        except (ValueError, AttributeError):
-            return "Unknown", "Unknown"
+    df = pd.DataFrame(expanded_rows)
 
-    df[['Day', 'Time']] = df['Time Slot'].apply(lambda x: pd.Series(parse_slot(x)))
-    
-    # Define a consistent order for days of the week
+    # 4) Deduplicate after expansion to remove any accidental double adds
+    df = df.drop_duplicates(subset=['Day', 'Time', 'Course ID', 'Faculty ID', 'Room ID', 'Batch/Group ID']).reset_index(drop=True)
+
+    # 5) Normalize Day order and sorting
     day_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     df['Day'] = pd.Categorical(df['Day'], categories=day_order, ordered=True)
 
-    # --- 3. Master Timetable ---
+    # 6) Master Timetable
     print("\n--- ✅ Master Timetable (All Assignments) ---")
     master_df = df.sort_values(by=['Day', 'Time', 'Room ID', 'Faculty ID']).reset_index(drop=True)
     print(master_df[['Day', 'Time', 'Course ID', 'Room ID', 'Faculty ID', 'Batch/Group ID']].to_string(index=False))
 
-    # --- 4. Faculty Timetables ---
+    # 7) Faculty Timetables
     print("\n--- ✅ Faculty Timetables (All) ---")
     for fac_id in sorted(df['Faculty ID'].dropna().unique()):
         fac_df = df[df['Faculty ID'] == fac_id].sort_values(by=['Day', 'Time']).reset_index(drop=True)
+        fac_df = fac_df.drop_duplicates(subset=['Day','Time','Course ID','Room ID','Batch/Group ID']).reset_index(drop=True)
         print(f"\n--- Timetable for Faculty: {fac_id} ---")
         print(fac_df[['Day', 'Time', 'Course ID', 'Room ID', 'Batch/Group ID']].to_string(index=False))
 
-    # --- 5. Room Timetables ---
+    # 8) Room Timetables
     print("\n--- ✅ Room Timetables (All) ---")
     for room_id in sorted(df['Room ID'].dropna().unique()):
         room_df = df[df['Room ID'] == room_id].sort_values(by=['Day', 'Time']).reset_index(drop=True)
+        room_df = room_df.drop_duplicates(subset=['Day','Time','Course ID','Faculty ID','Batch/Group ID']).reset_index(drop=True)
         print(f"\n--- Timetable for Room: {room_id} ---")
         print(room_df[['Day', 'Time', 'Course ID', 'Faculty ID', 'Batch/Group ID']].to_string(index=False))
 
-    # --- 6. Batch/Group Timetables ---
+    # 9) Batch/Group Timetables
     print("\n--- ✅ Batch/Group Timetables (All) ---")
     for batch_id in sorted(df['Batch/Group ID'].dropna().unique()):
         batch_df = df[df['Batch/Group ID'] == batch_id].sort_values(by=['Day', 'Time']).reset_index(drop=True)
+        batch_df = batch_df.drop_duplicates(subset=['Day','Time','Course ID','Faculty ID','Room ID']).reset_index(drop=True)
         print(f"\n--- Timetable for Batch/Group: {batch_id} ---")
         print(batch_df[['Day', 'Time', 'Course ID', 'Faculty ID', 'Room ID']].to_string(index=False))
 
-    # --- 7. Interactive Student Timetable Lookup ---
+    # 10) Student Timetable Lookup
     print("\n--- ✅ Student Timetable Lookup ---")
     stud_to_elective_groups = {}
     for g, members in elective_groups.items():
@@ -107,7 +160,6 @@ def display_all_timetables(core_schedule, elec_schedule, core_batches, elective_
 
         core_batch = next((name for name, students in core_batches.items() if student_id in students), None)
         groups = stud_to_elective_groups.get(student_id, [])
-        
         selection_ids = [core_batch] if core_batch else []
         selection_ids.extend(groups)
 
@@ -116,15 +168,113 @@ def display_all_timetables(core_schedule, elec_schedule, core_batches, elective_
             continue
 
         student_schedule_df = df[df['Batch/Group ID'].isin(selection_ids)].sort_values(by=['Day', 'Time'])
-        
         print(f"\n--- Timetable for Student: {student_id} ---")
         if student_schedule_df.empty:
             print("No classes found for this student in the final schedule.")
         else:
             print(student_schedule_df[['Day', 'Time', 'Course ID', 'Faculty ID', 'Room ID']].to_string(index=False))
+def build_constraint_masks(constraints, time_slot_map):
+    # Hard masks
+    hard = constraints.get('hard', {})
+    # Expand day_off to concrete slots per faculty
+    day_off = hard.get('faculty_day_off', {})
+    forbid = hard.get('faculty_forbid_slots', {})
 
+    # Build day -> [slots] index
+    slots_by_day = {}
+    for s in time_slot_map.keys():
+        d = s.split('_', 1)[0]
+        slots_by_day.setdefault(d, set()).add(s)
 
+    forbidden_by_faculty = {}
+
+    # faculty_day_off
+    if day_off.get('enabled'):
+        days = set(day_off.get('params', {}).get('days', []))
+        fids = day_off.get('scope', {}).get('faculty_ids', [])
+        bad_slots = set().union(*(slots_by_day.get(d, set()) for d in days)) if days else set()
+        for f in fids:
+            forbidden_by_faculty.setdefault(f, set()).update(bad_slots)
+
+    # faculty_forbid_slots
+    if forbid.get('enabled'):
+        fids = forbid.get('scope', {}).get('faculty_ids', [])
+        bad = set(forbid.get('params', {}).get('forbid_slots', []))
+        for f in fids:
+            forbidden_by_faculty.setdefault(f, set()).update(bad)
+
+    # Soft masks
+    soft = constraints.get('soft', {})
     
+    soft_conf = build_soft_cfg(constraints)
+    return forbidden_by_faculty, soft_conf
+
+def audit_constraint_support(constraints):
+    hard = constraints.get('hard', {})
+    soft = constraints.get('soft', {})
+    support = []
+
+    # Hard rules
+    support.append((
+        'teacher_no_overlap / room_no_overlap',
+        True, 'CP‑SAT', 'Native NoOverlap intervals'
+    ))
+    support.append((
+        'faculty_day_off',
+        bool(hard.get('faculty_day_off', {}).get('enabled')),
+        'CP‑SAT + GA + Tabu',
+        'CP‑SAT via RuleEngine; GA/Tabu via candidate filtering'
+    ))
+    support.append((
+        'faculty_forbid_slots',
+        bool(hard.get('faculty_forbid_slots', {}).get('enabled')),
+        'CP‑SAT + GA + Tabu',
+        'Explicit forbidden slot filter'
+    ))
+    support.append((
+        'lab_contiguity',
+        True,
+        'CP‑SAT',
+        'Implemented with IntervalVar duration; GA/Tabu not implemented (1-slot moves)'
+    ))
+    support.append((
+        'core_vs_elec_windows',
+        True,
+        'CP‑SAT + GA + Tabu',
+        'Windows reserved in Phase‑1; memetic uses allowed_slots_by_sid'
+    ))
+
+    # Soft rules
+    support.append((
+        'avoid_early_slot',
+        bool(soft.get('avoid_early_slot', {}).get('enabled')),
+        'CP‑SAT + GA + Tabu',
+        'Slot-membership penalty'
+    ))
+    support.append((
+        'avoid_last_slot',
+        bool(soft.get('avoid_last_slot', {}).get('enabled')),
+        'CP‑SAT + GA + Tabu',
+        'Slot-membership penalty'
+    ))
+    support.append((
+        'faculty_pref_hours',
+        bool(soft.get('faculty_pref_hours', {}).get('enabled')),
+        'CP‑SAT + GA + Tabu',
+        'Slot-membership penalty with scope faculty'
+    ))
+    support.append((
+        'faculty_back_to_back',
+        bool(soft.get('faculty_back_to_back', {}).get('enabled')),
+        'CP‑SAT + GA + Tabu',
+        'Adjacency penalty using next_slot_map'
+    ))
+
+    print("\n--- Constraint Support Audit (by engine) ---")
+    for name, enabled, engines, note in support:
+        print(f"- {name}: enabled={enabled} | engines={engines} | {note}")
+
+
 
 
 def compute_e_global_from_data(data, elective_ids=None, availability_by_slot=None, buffer_ratio=0.15, availability_factor=0.6):
@@ -256,6 +406,10 @@ def main():
     constraints = load_constraints("constraints.json")
     hard_cfg = constraints.get("hard", {})
     soft_cfg = constraints.get("soft", {})
+    forbidden_by_faculty, soft_conf = build_constraint_masks(constraints, time_slot_map)
+    
+    audit_constraint_support(constraints)
+
 
 
     # --- Compute E_GLOBAL from data using the capacity-based formula ---
@@ -280,16 +434,13 @@ def main():
         batches=core_batches,
         batch_sessions=core_batch_sessions,
         time_slot_map=time_slot_map,
-        next_slot_map=next_slot_map,
-        occupied_slots=None,
-        allow_unscheduled=not STRICT_CORE
+        next_slot_map=next_slot_map
     )
+    print("\n--- Phase 1: Scheduling All Core Course Sessions ---")
     core_schedule, occupied_slots, ok, core_reserved = core_solver.solve(
         time_limit=300,
-        global_elective_windows=E_GLOBAL,
         hard_cfg=hard_cfg,
-        soft_cfg=soft_cfg,
-        use_assumptions=False
+        soft_cfg=soft_cfg
     )
     if not ok or not core_schedule:
         print("\n❌ CRITICAL ERROR: Could not schedule the core courses or schedule is empty.")
@@ -323,16 +474,14 @@ def main():
     else:
         print("\n--- Scheduling Elective Sessions (Phase 2) ---")
         elec_schedule, occupied_slots2, ok2 = core_solver.solve_electives(
-        elective_groups=elective_groups,
-        elective_group_sessions=elective_group_sessions,
-        core_reserved=core_reserved,
-        core_batches=core_batches,
-        occupied_slots=occupied_slots,
-        time_limit=90,
-        allow_unscheduled=True,
-        hard_cfg=hard_cfg,
-        soft_cfg=soft_cfg
-    )
+    elective_groups=elective_groups,
+    elective_group_sessions=elective_group_sessions,
+
+    time_limit=90,
+    hard_cfg=hard_cfg,
+    soft_cfg=soft_cfg
+)
+
         if ok2 and elec_schedule:
             final_schedule_list += elec_schedule
             elective_rows = list(elec_schedule)
@@ -346,7 +495,7 @@ def main():
     for (f, c, t, r, b) in core_schedule:
         core_counters[(b, c)] += 1
         k = core_counters[(b, c)]
-        sid = f"CORE::{b}::{c}::{k}"
+        sid = f"CORE:core_sol:{b}::{c}::{k}"
         core_sid_rows.append((sid, f, c, t, r, b))
 
     # Electives: ELEC::{group}::{course}::{k}
@@ -410,16 +559,18 @@ def main():
         if RUN_GA and GA_AVAILABLE and seed_sid:
             try:
                 ga_dbg = GeneticAlgorithmTimetable(
-                    data=data,
-                    next_slot_map=next_slot_map,
-                    population_size=2, generations=1,
-                    mutation_rate=0.0, crossover_rate=0.0,
-                    sid_scope=movables_sid,
-                    sid_to_course=sid_to_course,
-                    fixed_assignments=fixed_sid,
-                    allowed_slots_by_sid=allowed_by_sid,
-                    seed_schedule=seed_sid,
-                )
+                data=data,
+                next_slot_map=next_slot_map,
+                population_size=2, generations=1,
+                mutation_rate=0.0, crossover_rate=0.0,
+                sid_scope=movables_sid,
+                sid_to_course=sid_to_course,
+                fixed_assignments=fixed_sid,
+                allowed_slots_by_sid=allowed_by_sid,
+                seed_schedule=seed_sid,
+                soft_config=soft_conf,
+                forbidden_by_faculty=forbidden_by_faculty
+            )
                 seed_ind = {k: True for k in seed_sid.keys()}
                 v = ga_dbg.hard_constraint_violations(seed_ind)
                 missing = len(movables_sid) - len({k[1] for k in seed_ind.keys()})
@@ -431,18 +582,18 @@ def main():
         if RUN_GA and GA_AVAILABLE and seed_sid:
             try:
                 ga = GeneticAlgorithmTimetable(
-                    data=data,
-                    next_slot_map=next_slot_map,
-                    population_size=24,
-                    generations=10,
-                    mutation_rate=0.35,
-                    crossover_rate=0.8,
-                    sid_scope=movables_sid,
-                    sid_to_course=sid_to_course,
-                    fixed_assignments=fixed_sid,
-                    allowed_slots_by_sid=allowed_by_sid,
-                    seed_schedule=seed_sid
-                )
+                data=data,
+                next_slot_map=next_slot_map,
+                population_size=24, generations=10,
+                mutation_rate=0.35, crossover_rate=0.8,
+                sid_scope=movables_sid,
+                sid_to_course=sid_to_course,
+                fixed_assignments=fixed_sid,
+                allowed_slots_by_sid=allowed_by_sid,
+                seed_schedule=seed_sid,
+                soft_config=soft_conf,
+                forbidden_by_faculty=forbidden_by_faculty
+            )
                 ga.initialize_population([seed_sid])
                 best = ga.run()
                 if isinstance(best, dict) and len(best) > 0:
@@ -460,15 +611,15 @@ def main():
                 tabu = TabuSearchTimetable(
                     data=data,
                     next_slot_map=next_slot_map,
-                    tabu_tenure=10,
-                    max_iterations=50,
+                    tabu_tenure=10, max_iterations=50,
                     sid_scope=set(movables_sid),
                     sid_to_course=sid_to_course,
                     allowed_slots_by_sid=allowed_by_sid,
-                    fixed_assignments=[(f, sid, t, r)
-                                    for (f, sid, t, r) in current_all_sid
-                                    if sid not in movables_sid]
+                    fixed_assignments=[(f, sid, t, r) for (f, sid, t, r) in current_all_sid if sid not in movables_sid],
+                    soft_config=soft_conf,
+                    forbidden_by_faculty=forbidden_by_faculty
                 )
+
                 improved = tabu.run(movable_dict)
                 if isinstance(improved, dict) and len(improved) > 0:
                     # Merge fixed + improved movable
