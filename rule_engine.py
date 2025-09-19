@@ -1,6 +1,5 @@
 # rule_engine.py
 from collections import defaultdict
-from ortools.sat.python import cp_model
 
 class RuleEngine:
     """

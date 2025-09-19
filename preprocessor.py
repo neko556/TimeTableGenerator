@@ -2,8 +2,48 @@ import pandas as pd
 import numpy as np
 import math
 from collections import defaultdict
+from typing import Tuple, Dict, List, Any
 
 
+
+def assemble_data(
+    data: Dict[str, Any] | None = None,
+    with_time_maps: bool = True
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, List[str]], Dict[str, List[str]], Dict[str, List[str]], Dict[str, List[str]], Dict[str, Any]]:
+   
+
+    # 1) Run the existing pipeline to get data + core structures
+    if data is None:
+        data_full, core_batches, core_batch_sessions = run_preprocessing_pipeline()
+    else:
+        # If a data dict is supplied, let the pipeline operate on it (reloading if needed)
+        # Your current run_preprocessing_pipeline() signature takes no args; reuse its behavior here.
+        data_full, core_batches, core_batch_sessions = run_preprocessing_pipeline()
+
+    # 2) Electives via your existing helper
+    elective_groups, elective_group_sessions = build_elective_groups_from_data(data_full)
+
+    # 3) Time maps
+    time_slot_map, next_slot_map = {}, {}
+    if with_time_maps:
+        try:
+            # Import locally to avoid hard dependency if some scripts don't need it
+            from time_slots import generate_time_slots
+            z,time_slot_map, next_slot_map = generate_time_slots()
+        except Exception as e:
+            print(f"[warn] Failed to generate time slots: {e}. Proceeding with empty maps.")
+            time_slot_map, next_slot_map = {}, {}
+
+    # 4) Return in the canonical order many callers expect
+    return (
+        time_slot_map,
+        next_slot_map,
+        core_batches,
+        core_batch_sessions,
+        elective_groups,
+        elective_group_sessions,
+        data_full,
+    )
 def build_elective_groups_from_data(data, elective_credits=3):
     # Ensure required frames exist; if not, reload from CSVs
     if 'courses' not in data or data['courses'] is None:
