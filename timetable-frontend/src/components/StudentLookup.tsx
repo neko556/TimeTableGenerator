@@ -1,6 +1,6 @@
 import { useState } from "react";
 import axios from "axios";
-import StudentTimetable from "./StudentTimetable";
+import StudentTimetable from "./StudentTimeTable";
 
 export default function StudentLookup() {
   const [studentId, setStudentId] = useState("");
@@ -14,7 +14,7 @@ export default function StudentLookup() {
     }
     setLoading(true);
     try {
-      const res = await axios.get(`http://localhost:5000/timetable/${studentId}`);
+      const res = await axios.get(`http://localhost:5001/timetable/${studentId}`);
       setTimetable(res.data.timetable || []);
     } catch (err) {
       alert("Could not fetch timetable for this student.");

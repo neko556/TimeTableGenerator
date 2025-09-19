@@ -11,7 +11,7 @@ export default function GenerateButton({ onGenerated }: { onGenerated: () => voi
     if (window.confirm("Do you want to regenerate the timetable? This may take time.")) {
       setLoading(true);
       try {
-        const res = await axios.get("http://localhost:5000/generate");
+        const res = await axios.get("http://localhost:5001/generate");
         alert(res.data.message || "Timetable generated!");
         onGenerated();
       } catch (err) {

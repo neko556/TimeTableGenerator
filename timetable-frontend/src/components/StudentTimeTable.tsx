@@ -1,12 +1,49 @@
+// timetable-frontend/src/components/StudentTimeTable.tsx
+import React from "react";
+
 type TimetableEntry = {
-  "Batch/Group ID": string;
-  "Course ID": string;
+  "Batch/Group ID"?: string;
+  "Course ID"?: string;
   "Day": string;
-  "Faculty ID": string;
-  "Room ID": string;
-  "Time": string;
-  "Time Slot": string;
+  "Faculty ID"?: string;
+  "Room ID"?: string;
+  "Time"?: string;
+  "Time Slot"?: string;
 };
+
+// fixed weekday order (always show these rows)
+const DAY_ORDER = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+// convert "HH:MM-..." to minutes (for sorting)
+function toMinutes(slot: string) {
+  if (!slot) return 0;
+  // accept both hyphen "-" and en-dash "–"
+  const sep = slot.includes("-") ? "-" : slot.includes("–") ? "–" : "-";
+  const start = slot.split(sep)[0].trim();
+  const match = start.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return 0;
+  const [, hh, mm] = match;
+  return parseInt(hh, 10) * 60 + parseInt(mm, 10);
+}
+
+// sanitize "Monday_10:00-11:00" -> "10:00-11:00"
+function sanitizeSlot(raw: string | undefined) {
+  if (!raw) return "";
+  // if it contains an underscore and starts with a weekday, drop the prefix
+  const parts = raw.split("_");
+  if (parts.length >= 2 && DAY_ORDER.includes(parts[0])) {
+    return parts.slice(1).join("_");
+  }
+  return raw;
+}
 
 export default function StudentTimetable({
   studentId,
@@ -17,29 +54,48 @@ export default function StudentTimetable({
 }) {
   if (!timetable || timetable.length === 0) {
     return (
+      <p className="text-gray-600">No classes found for student {studentId}.</p>
+    );
+  }
+
+  // === Build unique, sorted timeSlots (top row) ===
+  const timeSlotsSet = new Set<string>();
+  timetable.forEach((t) => {
+    const s = sanitizeSlot(t["Time Slot"] ?? t["Time"]);
+    if (s) timeSlotsSet.add(s);
+  });
+
+  const timeSlots = Array.from(timeSlotsSet).sort((a, b) =>
+    toMinutes(a) - toMinutes(b)
+  );
+
+  if (timeSlots.length === 0) {
+    return (
       <p className="text-gray-600">
-        No classes found for student {studentId}.
+        No time slots available in the timetable data for {studentId}.
       </p>
     );
   }
 
-  // Unique sorted days & time slots
-  const days = Array.from(new Set(timetable.map((t) => t.Day)));
-  const timeSlots = Array.from(new Set(timetable.map((t) => t["Time Slot"]))).sort();
-
-  // Map (day, time slot) -> entry
+  // === Build grid: timeSlot -> day -> entry ===
   const grid: Record<string, Record<string, TimetableEntry | null>> = {};
-  days.forEach((day) => {
-    grid[day] = {};
-    timeSlots.forEach((slot) => {
-      grid[day][slot] = null;
+  timeSlots.forEach((slot) => {
+    grid[slot] = {};
+    DAY_ORDER.forEach((d) => {
+      grid[slot][d] = null;
     });
   });
 
   timetable.forEach((entry) => {
-    grid[entry.Day][entry["Time Slot"]] = entry;
+    const slot = sanitizeSlot(entry["Time Slot"] ?? entry["Time"]);
+    if (!slot) return;
+    const day = entry.Day;
+    if (!DAY_ORDER.includes(day)) return; // ignore unknown day names
+    // if multiple entries map to same (slot,day) we'll keep the last one — adjust if you want merging
+    grid[slot][day] = entry;
   });
 
+  // === Render ===
   return (
     <div className="space-y-6">
       <h2 className="text-xl font-bold">📅 Timetable for {studentId}</h2>
@@ -50,23 +106,25 @@ export default function StudentTimetable({
             <tr>
               <th className="border px-3 py-2">Day</th>
               {timeSlots.map((slot) => (
-                <th key={slot} className="border px-3 py-2">
+                <th key={slot} className="border px-3 py-2 whitespace-nowrap">
                   {slot}
                 </th>
               ))}
             </tr>
           </thead>
+
           <tbody>
-            {days.map((day) => (
+            {DAY_ORDER.map((day) => (
               <tr key={day}>
                 <td className="border px-3 py-2 font-semibold bg-gray-50">
                   {day}
                 </td>
+
                 {timeSlots.map((slot) => {
-                  const entry = grid[day][slot];
+                  const entry = grid[slot][day];
                   return (
                     <td
-                      key={slot}
+                      key={day + "|" + slot}
                       className="border px-3 py-2 align-top hover:bg-gray-50"
                     >
                       {entry ? (
