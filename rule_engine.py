@@ -1,47 +1,19 @@
-# rule_engine.py
+import pandas as pd
 from collections import defaultdict
 
 class RuleEngine:
     """
-    Compiles hard and soft constraints from a flat config dict into CP-SAT constraints.
-
-    Input conventions
-    - hard_cfg / soft_cfg: dict {rule_id: {enabled, scope, params, weight?}}
-    - variables: dict key -> BoolVar where keys look like:
-        Phase-1 (cores):    (batch_id, session_id, faculty_id, room_id, t_start)
-        Phase-2 (electives):(group_name, session_id, faculty_id, room_id, t_start)
-    - occupancy: defaultdict(list) with ("faculty", f, t) or ("room", r, t) aggregations available.
-
-    Produces
-    - compile_hard: returns dict {rule_id: assumption BoolVar} if use_assumptions=True else {}
-    - compile_soft: returns penalty_terms = list of triples (name, weight_int, BoolVar)
+    Compiles declarative hard and soft constraints from a JSON config into
+    CP-SAT model constraints by recognizing and dispatching rule patterns.
     """
     def __init__(self, time_slot_map, next_slot_map):
         self.time_slot_map = time_slot_map
         self.next_slot_map = next_slot_map
 
-    # ------------- Utilities -------------
+    # ------------- Private Utilities -------------
     @staticmethod
     def _enabled(entry):
         return bool(entry and entry.get("enabled", False))
-
-    @staticmethod
-    def _list_from_scope(scope, key):
-        if not scope:
-            return []
-        v = scope.get(key, [])
-        if isinstance(v, str):
-            return [s for s in v.split("|") if s]
-        return list(v or [])
-
-    @staticmethod
-    def _set_from_params(params, key):
-        if not params:
-            return set()
-        raw = params.get(key, "")
-        if isinstance(raw, str):
-            return set(s for s in raw.split("|") if s)
-        return set(raw or [])
 
     @staticmethod
     def _w100(v, default=1.0):
@@ -50,157 +22,154 @@ class RuleEngine:
         except Exception:
             return int(round(float(default) * 100))
 
-    @staticmethod
-    def _day_of(t):
-        return str(t).split("_", 1)[0]
-
-    # Normalize variable keys to a common record with fields used by rules
-    @staticmethod
-    def _iter_assignments(variables):
+    def _iter_assignments(self, variables):
+        """Normalizes solver variables into a stream of consistent fact dictionaries."""
         for key, var in variables.items():
-            # Core: (b, sid, f, r, t)
-            # Elective: (g, sid, f, r, t)
-            if len(key) != 5:
-                continue
-            a0, session_id, f_id, r_id, t_start = key
-            course_id = str(session_id).split("_S")[0]
-            # batch_or_group is the first element (batch_id or group_name)
+            b_id, session_id, f_id, r_id, t_start = key
             yield {
-                "scope_id": a0,
+                "batch_id": b_id,
                 "session_id": session_id,
-                "course_id": course_id,
+                "course_id": session_id.split('_S')[0],
                 "faculty_id": f_id,
                 "room_id": r_id,
                 "t_start": t_start,
-                "day": RuleEngine._day_of(t_start),
+                "day_of_week": t_start.split('_')[0],
                 "var": var,
             }
 
-    # ------------- Hard rules -------------
-    def compile_hard(self, model, variables, occupancy, hard_cfg, use_assumptions=False):
+    # ------------- Hard Constraint Compilation -------------
+    def compile_hard(self, model, variables, hard_cfg):
         """
-        Returns: assume_on dict for optional rules if use_assumptions=True; else {}
+        Generically compiles hard constraints by dispatching to pattern handlers.
         """
-        assume_on = {}
+        for rule_id, rule_data in hard_cfg.items():
+            if not self._enabled(rule_data):
+                continue
 
-        def gate(rule_id):
-            if not use_assumptions:
-                return None
-            if rule_id not in assume_on:
-                a = model.NewBoolVar(f"assume__{rule_id}")
-                model.AddAssumption(a)
-                assume_on[rule_id] = a
-            return assume_on[rule_id]
+            pattern = rule_data.get("pattern")
+            
+            # --- The Dispatcher for Hard Rules ---
+            if pattern == "forbid_by_attribute":
+                self._apply_forbid_by_attribute_pattern(model, variables, rule_data)
+            # elif pattern == "another_hard_pattern":
+            #     self._apply_another_hard_pattern(...) # Future extension
+            else:
+                print(f"[warn] Unknown hard constraint pattern: '{pattern}' for rule '{rule_id}'")
+        print("[Rule Engine] Hard constraints compiled.")
 
-        # faculty_day_off
-        h = hard_cfg.get("faculty_day_off", {})
-        if self._enabled(h):
-            days = self._set_from_params(h.get("params", {}), "days")
-            f_scope = self._list_from_scope(h.get("scope", {}), "faculty_ids")
-            f_set = set(f_scope)
-            a = gate("faculty_day_off")
-            for rec in self._iter_assignments(variables):
-                if rec["faculty_id"] in f_set and rec["day"] in days:
-                    if a is None:
-                        model.Add(rec["var"] == 0)
-                    else:
-                        model.Add(rec["var"] == 0).OnlyEnforceIf(a)
-
-        # faculty_forbid_slots
-        h = hard_cfg.get("faculty_forbid_slots", {})
-        if self._enabled(h):
-            forbid = self._set_from_params(h.get("params", {}), "forbid_slots")
-            f_scope = self._list_from_scope(h.get("scope", {}), "faculty_ids")
-            f_set = set(f_scope)
-            a = gate("faculty_forbid_slots")
-            for rec in self._iter_assignments(variables):
-                if rec["faculty_id"] in f_set and rec["t_start"] in forbid:
-                    if a is None:
-                        model.Add(rec["var"] == 0)
-                    else:
-                        model.Add(rec["var"] == 0).OnlyEnforceIf(a)
-
-        return assume_on
-
-    # ------------- Soft rules -------------
-    def compile_soft(self, model, variables, soft_cfg, occupancy=None):
+    def _apply_forbid_by_attribute_pattern(self, model, variables, rule):
         """
-        Returns a list of penalty terms as triples (name, weight_int, BoolVar)
+        Handler for rules that forbid an assignment if all filter conditions match.
+        """
+        filters = rule.get("filter", {})
+        if not filters:
+            return
+
+        for assignment_fact in self._iter_assignments(variables):
+            is_match = True
+            for key, required_values in filters.items():
+                if assignment_fact.get(key) not in required_values:
+                    is_match = False
+                    break
+            
+            if is_match:
+                model.Add(assignment_fact["var"] == 0)
+    
+    # ------------- Soft Constraint Compilation -------------
+    def compile_soft(self, model, variables, soft_cfg):
+        """
+        Generically compiles soft constraints and returns penalty terms.
         """
         terms = []
+        for rule_id, rule_data in soft_cfg.items():
+            if not self._enabled(rule_data):
+                continue
 
-        # avoid_last_slot
-        conf = soft_cfg.get("avoid_last_slot", {})
-        if self._enabled(conf):
-            last = self._set_from_params(conf.get("params", {}), "last_slot_by_day")
-            w = self._w100(conf.get("weight", 1.0), 1.0)
-            for rec in self._iter_assignments(variables):
-                if rec["t_start"] in last:
-                    v = model.NewBoolVar(f"p_last__{rec['scope_id']}__{rec['session_id']}__{rec['t_start']}")
-                    model.Add(rec["var"] == 1).OnlyEnforceIf(v)
-                    model.Add(rec["var"] == 0).OnlyEnforceIf(v.Not())
-                    terms.append(("avoid_last_slot", w, v))
+            pattern = rule_data.get("pattern")
 
-        # avoid_early_slot
-        conf = soft_cfg.get("avoid_early_slot", {})
-        if self._enabled(conf):
-            early = self._set_from_params(conf.get("params", {}), "early_slots")
-            w = self._w100(conf.get("weight", 2.0), 2.0)
-            for rec in self._iter_assignments(variables):
-                if rec["t_start"] in early:
-                    v = model.NewBoolVar(f"p_early__{rec['scope_id']}__{rec['session_id']}__{rec['t_start']}")
-                    model.Add(rec["var"] == 1).OnlyEnforceIf(v)
-                    model.Add(rec["var"] == 0).OnlyEnforceIf(v.Not())
-                    terms.append(("avoid_early_slot", w, v))
-
-        # faculty_pref_hours (dispreferred slots)
-        conf = soft_cfg.get("faculty_pref_hours", {})
-        if self._enabled(conf):
-            bad = self._set_from_params(conf.get("params", {}), "dispreferred")
-            w = self._w100(conf.get("weight", 2.0), 2.0)
-            f_scope = set(self._list_from_scope(conf.get("scope", {}), "faculty_ids"))
-            for rec in self._iter_assignments(variables):
-                if (not f_scope) or (rec["faculty_id"] in f_scope):
-                    if rec["t_start"] in bad:
-                        v = model.NewBoolVar(f"p_fac_bad__{rec['scope_id']}__{rec['session_id']}__{rec['faculty_id']}__{rec['t_start']}")
-                        model.Add(rec["var"] == 1).OnlyEnforceIf(v)
-                        model.Add(rec["var"] == 0).OnlyEnforceIf(v.Not())
-                        terms.append(("faculty_dispreferred", w, v))
-
-        # faculty_back_to_back: penalty on consecutive hours per faculty
-        conf = soft_cfg.get("faculty_back_to_back", {})
-        if self._enabled(conf) and occupancy is not None:
-            try:
-                window = int(str(conf.get("params", {}).get("window", 2)))
-            except Exception:
-                window = 2
-            w = self._w100(conf.get("weight", 1.5), 1.5)
-            # Build S_{f,t} == OR(vars at (f,t)); AtMostOne already makes sum binary
-            S = {}
-            for (kind, f, t), vs in occupancy.items():
-                if kind != "faculty" or not vs:
-                    continue
-                s = model.NewBoolVar(f"S_fac_{f}_{t}")
-                model.Add(sum(vs) >= 1).OnlyEnforceIf(s)
-                model.Add(sum(vs) == 0).OnlyEnforceIf(s.Not())
-                S[(f, t)] = s
-            # Penalize adjacency within window
-            for (f, t), s in S.items():
-                nxt = t
-                count_vars = []
-                for _ in range(window - 1):
-                    nxt = self.next_slot_map.get(nxt)
-                    if nxt is None:
-                        break
-                    if (f, nxt) in S:
-                        b2b = model.NewBoolVar(f"p_b2b_{f}_{t}_{nxt}")
-                        s2 = S[(f, nxt)]
-                        model.Add(b2b <= s)
-                        model.Add(b2b <= s2)
-                        model.Add(b2b >= s + s2 - 1)
-                        count_vars.append(b2b)
-                for v in count_vars:
-                    terms.append(("faculty_back_to_back", w, v))
-
+            # --- The Dispatcher for Soft Rules ---
+            if pattern == "apply_penalty_by_attribute":
+                new_terms = self._apply_penalty_by_attribute_pattern(model, variables, rule_id, rule_data)
+                terms.extend(new_terms)
+            # elif pattern == "another_soft_pattern":
+            #     new_terms = self._apply_other_soft_pattern(...) # Future extension
+            #     terms.extend(new_terms)
+            else:
+                print(f"[warn] Unknown soft constraint pattern: '{pattern}' for rule '{rule_id}'")
+        
+        print("[Rule Engine] Soft constraints compiled.")
         return terms
- 
+
+    def _apply_penalty_by_attribute_pattern(self, model, variables, rule_id, rule):
+        """
+        Handler for rules that apply a penalty if an assignment matches all filter conditions.
+        """
+        filters = rule.get("filter", {})
+        if not filters:
+            return []
+        
+        w = self._w100(rule.get("weight", 1.0))
+        penalty_terms = []
+
+        for assignment_fact in self._iter_assignments(variables):
+            is_match = True
+            for key, required_values in filters.items():
+                if assignment_fact.get(key) not in required_values:
+                    is_match = False
+                    break
+            
+            if is_match:
+                penalty_var = model.NewBoolVar(f"p_{rule_id}_{assignment_fact['session_id']}_{assignment_fact['t_start']}")
+                model.Add(assignment_fact["var"] == 1).OnlyEnforceIf(penalty_var)
+                model.Add(assignment_fact["var"] == 0).OnlyEnforceIf(penalty_var.Not())
+                penalty_terms.append((rule_id, w, penalty_var))
+
+        return penalty_terms
+    def calculate_penalty_score(self, individual, soft_cfg, sid_to_course):
+            """
+            Calculates a total penalty score for a given GA/Tabu individual (a concrete schedule)
+            based on the soft constraint configuration.
+            """
+            total_penalty = 0.0
+            if not individual:
+                return 0.0
+
+            for rule_id, rule_data in soft_cfg.items():
+                if not self._enabled(rule_data):
+                    continue
+                
+                pattern = rule_data.get("pattern")
+                
+                # --- Dispatcher for Scoring ---
+                if pattern == "apply_penalty_by_attribute":
+                    filters = rule_data.get("filter", {})
+                    weight = float(rule_data.get("weight", 1.0))
+                    if not filters:
+                        continue
+
+                    # Iterate over each scheduled session in the GA individual
+                    for (f_id, sid, t_start, r_id) in individual.keys():
+                        
+                        # Create a "fact" dictionary for the current assignment
+                        assignment_fact = {
+                            "session_id": sid,
+                            "course_id": sid_to_course.get(sid),
+                            "faculty_id": f_id,
+                            "room_id": r_id,
+                            "t_start": t_start,
+                            "day_of_week": t_start.split('_')[0],
+                        }
+                        
+                        # Check if the assignment matches the rule's filter
+                        is_match = True
+                        for key, required_values in filters.items():
+                            if assignment_fact.get(key) not in required_values:
+                                is_match = False
+                                break
+                        
+                        if is_match:
+                            total_penalty += weight
+                
+                # Add 'elif' blocks here to handle other patterns in the future
+
+            return total_penalty

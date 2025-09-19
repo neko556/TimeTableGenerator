@@ -1,54 +1,91 @@
 {
-  "hard": {
-    "faculty_day_off": {
-      "enabled": true,
-      "scope": {
-        "faculty_ids": [
-          "FAC001"
-        ]
-      },
-      "params": {
-        "days": [
-          "Friday"
-        ]
-      }
-    }
-  },
-  "soft": {
-    "avoid_early_slot": {
-      "enabled": true,
-      "weight": 2.0,
-      "params": {
-        "early_slots": [
-          "Monday_09:00-10:00",
-          "Tuesday_09:00-10:00",
-          "Wednesday_09:00-10:00",
-          "Thursday_09:00-10:00",
-          "Friday_09:00-10:00",
-          "Saturday_09:00-10:00"
-        ]
-      }
+    "hard_constraints": {
+        "faculty_day_off_monday_FAC001": {
+            "enabled": true,
+            "pattern": "forbid_by_attribute",
+            "filter": {
+                "faculty_id": [
+                    "FAC001"
+                ],
+                "day_of_week": [
+                    "Monday"
+                ]
+            }
+        },
+        "forbid_CRS404_in_ROOM101": {
+            "enabled": true,
+            "pattern": "forbid_by_attribute",
+            "filter": {
+                "course_id": [
+                    "CRS404"
+                ],
+                "room_id": [
+                    "ROOM101"
+                ]
+            }
+        },
+        "forbid_labs_on_fridays": {
+            "enabled": true,
+            "pattern": "forbid_by_attribute",
+            "filter": {
+                "course_type": [
+                    "Lab"
+                ],
+                "day_of_week": [
+                    "Friday"
+                ]
+            }
+        },
+        "faculty_day_off_FAC005_Wednesday": {
+            "enabled": true,
+            "pattern": "forbid_by_attribute",
+            "filter": {
+                "faculty_id": [
+                    "FAC005"
+                ],
+                "day_of_week": [
+                    "Wednesday"
+                ]
+            }
+        },
+        "faculty_day_off_FAC005_Saturday": {
+            "enabled": true,
+            "pattern": "forbid_by_attribute",
+            "filter": {
+                "faculty_id": [
+                    "FAC005"
+                ],
+                "day_of_week": [
+                    "Saturday"
+                ]
+            }
+        }
     },
-    "avoid_last_slot": {
-      "enabled": true,
-      "weight": 3.0,
-      "params": {
-        "last_slot_by_day": [
-          "Monday_16:00-17:00",
-          "Tuesday_16:00-17:00",
-          "Wednesday_16:00-17:00",
-          "Thursday_16:00-17:00",
-          "Friday_16:00-17:00",
-          "Saturday_16:00-17:00"
-        ]
-      }
-    },
-    "faculty_back_to_back": {
-      "enabled": true,
-      "weight": 1.5,
-      "params": {
-        "window": 2
-      }
+    "soft_constraints": {
+        "avoid_last_slot_global": {
+            "enabled": true,
+            "pattern": "apply_penalty_by_attribute",
+            "weight": 1.5,
+            "filter": {
+                "t_start": [
+                    "Monday_16:00-17:00",
+                    "Tuesday_16:00-17:00"
+                ]
+            }
+        },
+        "faculty_prefers_mornings_FAC007": {
+            "enabled": true,
+            "pattern": "apply_penalty_by_attribute",
+            "weight": 2.0,
+            "filter": {
+                "faculty_id": [
+                    "FAC007"
+                ],
+                "t_start": [
+                    "Monday_14:00-15:00",
+                    "Tuesday_14:00-15:00"
+                ]
+            }
+        }
     }
-  }
 }

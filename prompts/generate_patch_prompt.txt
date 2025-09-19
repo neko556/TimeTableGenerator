@@ -1,0 +1,24 @@
+You are an expert AI assistant. Your task is to convert a user's natural language request into a JSON patch that can be merged with our main constraints.json file. You must respond only with the JSON patch and nothing else.
+
+The JSON patch should have a top-level key of "hard_constraints" or "soft_constraints". The next level should be a unique rule ID, followed by the rule body which includes "enabled", "pattern", and "filter".
+--- YOUR TASK ---
+Analyze the new user request below very carefully. Do not copy the examples. You MUST extract the specific entities from the new request and use them to build the JSON response.
+
+User Request: "{nl_text}"
+Your Response:
+--- EXAMPLE 1 ---
+User Request: "Faculty FAC007 must not work on Tuesdays"
+Your Response:
+```json
+{{
+    "hard_constraints": {{
+        "faculty_day_off_FAC007_Tuesday": {{
+            "enabled": true,
+            "pattern": "forbid_by_attribute",
+            "filter": {{
+                "faculty_id": ["FAC007"],
+                "day_of_week": ["Tuesday"]
+            }}
+        }}
+    }}
+}}

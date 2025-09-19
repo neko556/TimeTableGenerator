@@ -19,8 +19,10 @@
   "labels":{
     "ner":[
       "COURSE_ID",
+      "COURSE_TYPE",
       "DAY_OF_WEEK",
       "FACULTY_ID",
+      "INTENT",
       "ROOM_ID",
       "TIME_SLOT"
     ]

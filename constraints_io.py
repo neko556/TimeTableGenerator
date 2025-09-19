@@ -1,75 +1,84 @@
-import argparse
 import json
-import pandas as pd
-from dotenv import load_dotenv
-from preprocessor import assemble_data
-from nlp_rules import propose_and_apply
 
-# --- Main CLI Application ---
-
-def main():
-    """
-    Command-line interface to test the hybrid NLP rule parsing system.
-    """
+def load_constraints(filepath: str) -> dict:
+    """Loads the constraints.json file."""
+    try:
+        with open(filepath, 'r') as f:
+            constraints = json.load(f)
+    except FileNotFoundError:
+        constraints = {}
     
-    load_dotenv()
-    
-    parser = argparse.ArgumentParser(
-        description="Parse a natural language rule into a JSON constraint patch."
-    )
-    parser.add_argument("text", type=str, help="The natural language rule to parse.")
-    parser.add_argument(
-        "--apply", 
-        action="store_true", 
-        help="If set, the script will simulate applying the change (requires full dry-run logic)."
-    )
-    args = parser.parse_args()
+    if "hard_constraints" not in constraints:
+        constraints["hard_constraints"] = {}
+    if "soft_constraints" not in constraints:
+        constraints["soft_constraints"] = {}
+        
+    return constraints
 
-    print("--- Starting NLP Rule Parser ---")
+def save_constraints(filepath: str, data: dict):
+    """Saves the constraints dictionary back to a JSON file."""
+    with open(filepath, 'w') as f:
+        json.dump(data, f, indent=4)
+    print(f"[io] Successfully saved updated constraints to {filepath}")
+
+def apply_patch_to_json(filepath: str, patch: dict):
+    """Loads a JSON file, applies a patch, and saves it back."""
+    constraints = load_constraints(filepath)
+    
+    for category, ops in patch.items():
+        if category in constraints:
+            for op, rules in ops.items():
+                if op == "add":
+                    for rule_id, rule_body in rules.items():
+                        constraints[category][rule_id] = rule_body
+                        print(f"  - Added rule '{rule_id}' to '{category}'")
+    
+    save_constraints(filepath, constraints)
+# constraints_io.py
+
+import json
+import copy
+from typing import Dict, Any
+
+def deep_merge_constraints(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Recursively merges a patch dictionary into a base dictionary.
+    This function is "pure"—it returns a new dictionary and does not modify the original.
+    """
+    res = copy.deepcopy(base or {})
+    for k, v in (patch or {}).items():
+        if k in res and isinstance(res[k], dict) and isinstance(v, dict):
+            res[k] = deep_merge_constraints(res[k], v)
+        else:
+            res[k] = copy.deepcopy(v)
+    return res
+
+def apply_patch_to_json(file_path: str, patch: Dict[str, Any]):
+    """
+    Loads a JSON file, safely merges a patch into it, and saves it back.
+    """
+    if not patch:
+        print("[io] WARN: Received an empty patch. No changes will be applied.")
+        return
 
     try:
-        # 1. Load all necessary data artifacts using your preprocessor
-        print("[1/3] Loading and preprocessing data...")
-        (
-            time_slot_map,
-            next_slot_map,
-            core_batches,
-            core_batch_sessions,
-            elective_groups,
-            elective_group_sessions,
-            data_full,
-        ) = assemble_data()
-        print("      Data loaded successfully.")
+        # Step 1: Read existing data. Handle cases where the file is missing or empty.
+        existing_data = {}
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                existing_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print(f"[io] WARN: '{file_path}' not found or is invalid. A new file will be created.")
 
-        # 2. Call the main NLP orchestrator function
-        print(f"[2/3] Parsing request: '{args.text}'")
-        result = propose_and_apply(
-            nl_text=args.text,
-            data=data_full,
-            time_slot_map=time_slot_map,
-            next_slot_map=next_slot_map,
-            core_batches=core_batches,
-            core_batch_sessions=core_batch_sessions
-            # Add any other arguments your full propose_and_apply function might need
-        )
-        print("      Parsing complete.")
+        # Step 2: Merge the patch. This is the most critical part.
+        # You MUST assign the returned value of the merge function to a variable.
+        merged_data = deep_merge_constraints(existing_data, patch)
 
-        # 3. Display the final result
-        print("[3/3] Result from NLP pipeline:")
-        # The 'patch' is the main JSON output
-        # The 'status' indicates if it's ready for the next step (validation/dry-run)
-        print(json.dumps(result, indent=2))
+        # Step 3: Write the newly merged data back to the file.
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(merged_data, f, indent=4)
+        
+        print(f"[io] Successfully saved updated constraints to {file_path}")
 
-        if args.apply:
-            print("\n--- Simulation: Applying Patch ---")
-            # In a real application, you would now take the `result['patch']`
-            # and run it through your validation and dry-run solvers.
-            print("NOTE: This is where you would merge the patch and run a solver simulation.")
-            
     except Exception as e:
-        print(f"\n--- An Error Occurred ---")
-        print(f"Error: {e}")
-        print("---------------------------")
-
-if __name__ == "__main__":
-    main()
+        print(f"[io] ERROR: Failed to apply patch to '{file_path}'. Reason: {e}")

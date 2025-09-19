@@ -6,7 +6,7 @@ import pandas as pd
 import time
 from scorer import soft_penalty
 import math 
-
+from rule_engine import RuleEngine
 
 class GeneticAlgorithmTimetable:
     """
@@ -16,7 +16,7 @@ class GeneticAlgorithmTimetable:
     - Seed-aware repair builds a feasible first individual to avoid negative wall scores.
     """
 
-    def __init__(self, data, next_slot_map,
+    def __init__(self, data, time_slot_map,next_slot_map,
                  population_size=24, generations=10,
                  mutation_rate=0.35, crossover_rate=0.8,
                  sid_scope=None,
@@ -31,11 +31,13 @@ class GeneticAlgorithmTimetable:
         self.population_size = population_size
         self.generations = generations
         self.mutation_rate = mutation_rate
+        self.time_slot_map = time_slot_map 
         self.crossover_rate = crossover_rate
         self.soft_cfg = dict(soft_config or {})
         self.population = []
         self.forbidden_by_faculty = {k: set(v) for k, v in (forbidden_by_faculty or {}).items()}
 
+        self.rule_engine = RuleEngine(self.time_slot_map, self.next_slot_map)
 
         self.sid_scope = list(sid_scope or [])
         self.sid_to_course = dict(sid_to_course or {})
@@ -290,8 +292,13 @@ class GeneticAlgorithmTimetable:
         return 1.0 / (1.0 + avg_gap)
     def fitness(self, individual):
         v = self.hard_constraint_violations(individual)
-        if v > 0: return -1e9 * float(v)
-        pen = soft_penalty(individual, self.soft_cfg, self.next_slot_map, sid_to_course=self.sid_to_course)
+        if v > 0:
+            return -1e9 * float(v)
+        
+        # Use the RuleEngine to calculate the soft penalty
+        pen = self.rule_engine.calculate_penalty_score(
+            individual, self.soft_cfg, sid_to_course=self.sid_to_course
+        )
         return -float(pen)
 
     # --------- operators ---------
@@ -351,52 +358,7 @@ class GeneticAlgorithmTimetable:
         mutated[best if best else target] = True
 
         return mutated
-    def soft_penalty(individual, soft_cfg, next_slot_map, sid_to_course=None):
-        # individual: dict[(f,sid,t,r)] -> True
-        # Build per-faculty occupancy by slot
-        fac_slots = defaultdict(set)
-        for (f, sid, t, r) in individual.keys():
-            fac_slots[f].add(t)
-
-        pen = 0.0
-
-        # avoid_early_slot
-        se = soft_cfg.get('avoid_early_slot', {})
-        if se.get('enabled'):
-            early = se.get('slots', set()); w = se.get('w', 2.0)
-            for (f, sid, t, r) in individual.keys():
-                if t in early: pen += w
-
-        # avoid_last_slot
-        sl = soft_cfg.get('avoid_last_slot', {})
-        if sl.get('enabled'):
-            last = sl.get('slots', set()); w = sl.get('w', 1.0)
-            for (f, sid, t, r) in individual.keys():
-                if t in last: pen += w
-
-        # faculty_pref_hours (dispreferred times)
-        fp = soft_cfg.get('faculty_pref_hours', {})
-        if fp.get('enabled'):
-            bad = fp.get('dispreferred', set())
-            scope = fp.get('scope_fids', set())
-            w = fp.get('w', 2.0)
-            for (f, sid, t, r) in individual.keys():
-                if (not scope or f in scope) and (t in bad):
-                    pen += w
-
-        # faculty_back_to_back: count adjacent occupancies
-        fb = soft_cfg.get('faculty_back_to_back', {})
-        if fb.get('enabled'):
-            w = fb.get('w', 1.5); W = max(2, int(fb.get('window', 2)))
-            for f, slots in fac_slots.items():
-                for t in list(slots):
-                    nxt = t
-                    for _ in range(W - 1):
-                        nxt = next_slot_map.get(nxt)
-                        if nxt is None: break
-                        if nxt in slots: pen += w
-        return pen
-
+    
 
     # --------- loop ---------
     def run(self):

@@ -4,10 +4,10 @@ import copy
 import random
 import pandas as pd
 from collections import deque, defaultdict
-from scorer import soft_penalty
+from rule_engine import RuleEngine
 
 class TabuSearchTimetable:
-    def __init__(self, data, next_slot_map,
+    def __init__(self, data, time_slot_map,next_slot_map,
                  tabu_tenure=10, max_iterations=50,
                  sid_scope=None,
                  sid_to_course=None,
@@ -15,14 +15,17 @@ class TabuSearchTimetable:
                  fixed_assignments=None,
                  soft_config=None, forbidden_by_faculty=None):  
         self.data = data
+        self.time_slot_map = time_slot_map
         self.next_slot_map = next_slot_map
         self.max_iterations = max_iterations
         self.tabu_attrs = deque(maxlen=2000)
+        self.soft_cfg = dict(soft_config or {})
 
         self.sid_scope = set(sid_scope or [])
         self.sid_to_course = dict(sid_to_course or {})
         self.allowed = allowed_slots_by_sid or {}
         self.fixed_assignments = list(fixed_assignments or [])
+        self.rule_engine = RuleEngine(self.time_slot_map, self.next_slot_map)
 
         self.courses_df = self.data['courses']
         self.data['time_slot_map'] = self.data.get('time_slot_map', {})
@@ -127,10 +130,14 @@ class TabuSearchTimetable:
 
     def fitness(self, individual):
         v = self.hard_constraint_violations(individual)
-        if v > 0: return -1000.0 * v
-        pen = soft_penalty(individual, self.soft_cfg, self.next_slot_map, sid_to_course=self.sid_to_course)
+        if v > 0:
+            return -1000.0 * v
+        
+        # Use the RuleEngine to calculate the soft penalty
+        pen = self.rule_engine.calculate_penalty_score(
+            individual, self.soft_cfg, sid_to_course=self.sid_to_course
+        )
         return -float(pen)
-
     # neighborhoods
     def _room_ok(self, c_id, r_row, group_size):
         rtype = str(r_row.get('room_type', '')).lower()

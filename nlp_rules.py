@@ -4,147 +4,116 @@ import os
 import json
 import copy
 from typing import Dict, Any, List
-
 import pandas as pd
 from dotenv import load_dotenv
 import google.generativeai as genai
+from ner_parser import NerParser
 
-# Import the new custom NER parser function
-from deterministic_parser import run_custom_ner_parser
-
+# --- Initialization ---
+ner_parser = NerParser()
 load_dotenv()
 
-# --- Helper Functions ---
 
-def deep_merge_constraints(base: dict, patch: dict) -> dict:
-    res = copy.deepcopy(base or {})
-    for k, v in (patch or {}).items():
-        if k in res and isinstance(res[k], dict) and isinstance(v, dict):
-            res[k] = deep_merge_constraints(res[k], v)
-        else:
-            res[k] = copy.deepcopy(v)
-    return res
+# --- NEW: Deterministic Patch Builder ---
+def build_patch_from_entities(entities: Dict[str, str]) -> Dict[str, Any]:
+    """
+    Attempts to build a JSON patch directly from NER-extracted entities
+    for known, simple rule patterns.
+    """
+    patch = {}
+    faculty_id = entities.get("FACULTY_ID")
+    day_of_week = entities.get("DAY_OF_WEEK")
 
-def _slot_keys_from_map(time_slot_map: Dict[str, Any]) -> List[str]:
-    return list((time_slot_map or {}).keys())
-
-def _faculty_ids_from_data(data: Dict[str, Any]) -> List[str]:
-    fac = data.get("faculty")
-    if isinstance(fac, pd.DataFrame) and "faculty_id" in fac.columns:
-        return fac["faculty_id"].astype(str).dropna().unique().tolist()
-    return []
-
-def _normalize_days_for_solver(days: List[str], slot_keys: List[str]) -> List[str]:
-    """Ensures day names from either parser match the solver's expected format."""
-    day_map = {key.split('_', 1)[0].lower()[:3]: key.split('_', 1)[0] for key in slot_keys if '_' in key}
-    normalized_days = set()
-    for day in days:
-        short_name = day.lower()[:3]
-        if short_name in day_map:
-            normalized_days.add(day_map[short_name])
-    return sorted(list(normalized_days))
-
-def _sanitize_patch(patch: dict, context: dict) -> dict:
-    """A critical safety check for the output of any parser."""
-    if not patch:
-        return {}
-    
-    res = copy.deepcopy(patch)
-    known_fids = set(context.get("faculty_ids", []))
-    slot_keys = context.get("slot_keys", [])
-
-    if "faculty_day_off" in res.get("hard", {}):
-        rule = res["hard"]["faculty_day_off"]
-        rule["scope"]["faculty_ids"] = [fid for fid in rule.get("scope", {}).get("faculty_ids", []) if fid in known_fids]
-        rule["params"]["days"] = _normalize_days_for_solver(rule.get("params", {}).get("days", []), slot_keys)
+    # --- Rule Pattern 1: Faculty Day Off ---
+    if faculty_id and day_of_week:
+        print("[INFO] Matched deterministic rule: 'faculty_day_off'")
         
-        if not rule["scope"]["faculty_ids"] or not rule["params"]["days"]:
-            del res["hard"]["faculty_day_off"]
-            if not res["hard"]:
-                del res["hard"]
+        # FIX: Normalize the day of the week (e.g., "Wednesdays" -> "Wednesday")
+        normalized_day = day_of_week.rstrip('s')
+
+        # Create a unique key for the constraint
+        constraint_key = f"faculty_day_off_{faculty_id}_{normalized_day}"
+
+        patch = {
+            "hard_constraints": {
+                constraint_key: {
+                    "enabled": True,
+                    "pattern": "forbid_by_attribute",
+                    "filter": {
+                        "faculty_id": [faculty_id],
+                        "day_of_week": [normalized_day]
+                    }
+                }
+            }
+        }
     
-    return res
+    # Add more 'elif' blocks here for other known patterns
+    # elif entities.get("COURSE_ID") and entities.get("ROOM_ID"):
+    #     ... build another patch type ...
 
-# --- LLM Fallback Function ---
-
-def llm_parse_to_patch(nl_text: str, context: dict) -> dict:
-    # (This function remains the same as the previous version)
-    # ...
-    return {} # For brevity, keeping it empty, but the full implementation from previous answer goes here.
+    return patch
 
 
-# --- Main Orchestrator ---
-
-def propose_and_apply(nl_text: str, data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
-    time_slot_map = kwargs.get("time_slot_map", {})
-    context = {
-        "slot_keys": _slot_keys_from_map(time_slot_map),
-        "faculty_ids": _faculty_ids_from_data(data),
-    }
-
-    # 1. Try the flexible Custom NER parser first.
-    patch = run_custom_ner_parser(nl_text, context)
-    source = "nlp"
-
-    # 2. If it fails, fall back to the powerful LLM.
-    if not patch:
-        print("[INFO] Custom NER parser failed. Falling back to LLM (Gemini)...")
-        patch = llm_parse_to_patch(nl_text, context)
-        source = "gemini" if patch else "none"
-
-    # 3. Sanitize the output from either source to ensure it's valid.
-    sanitized_patch = _sanitize_patch(patch, context)
-
-    status = "Ready" if sanitized_patch else "No valid constraints extracted"
-    
-    return {"patch": sanitized_patch, "status": status, "source": source}
-
-
-def dry_run_constraints(merged: dict, **kwargs) -> dict:
-    if not merged.get("hard") and not merged.get("soft"):
-         return {"status": "No change"}
-    print("[INFO] Starting dry-run simulation with merged constraints...")
-    return {"status": "Dry-run simulation complete (placeholder)", "is_feasible": True}
-def generate_new_rule_with_llm(nl_text: str, rule_engine_code: str):
-    """
-    This is the "programmer" LLM. It's called when no existing rule matches.
-    """
+# --- LLM Function (Fallback) ---
+def llm_parse_to_patch(nl_text: str, context_snippets: dict, prompt_path: str) -> dict:
+    """Asks the LLM to generate a JSON patch as a fallback."""
+    # (This function can remain exactly as it was, no changes needed)
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        print("[WARN] GOOGLE_API_KEY not found. Cannot generate new rules.")
-        return None
-
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash") # Use a powerful model for this
-
-    prompt = f"""
-    You are a senior Python developer specializing in constraint satisfaction problems.
-    A user's request could not be handled by our current system. Your task is to write a new Python function for a scheduling rule that can be added to our existing rule engine.
-
-    The user's request was: "{nl_text}"
-
-    Here is the full code for our current rule_engine.py:
-    ```
-    {rule_engine_code}
-    ```
-
-    Instructions:
-    1. Analyze the user's request and the existing code.
-    2. Write a single, complete Python function for a new rule. Name it `compile_new_<rule_name>`.
-    3. The function must take `self, model, variables, cfg, **kwargs` as arguments and correctly interact with the `model` and `variables` as shown in the other compile functions.
-    4. Return only the Python code for the new function, with no other text or explanation.
-    """
+        print("[WARN] GOOGLE_API_KEY not found.")
+        return {}
 
     try:
-        print("[INFO] Asking LLM to generate a new rule function...")
-        response = model.generate_content(prompt)
-        # Save the suggested code to a file for review
-        with open("suggested_rule.py", "w") as f:
-            f.write(response.text)
-        print("\n[SUCCESS] A new rule has been suggested by the LLM.")
-        print("Please review the code in 'suggested_rule.py' and manually add it to rule_engine.py if it looks correct.")
-        return response.text
-    except Exception as e:
-        print(f"[ERROR] LLM rule generation failed: {e}")
-        return None
+        with open(os.path.join(prompt_path, "generate_patch_prompt.txt"), "r") as f:
+            prompt_template = f.read()
+    except FileNotFoundError:
+        print(f"[ERROR] Prompt file not found in path: {prompt_path}")
+        return {}
 
+    final_prompt = prompt_template.format(nl_text=nl_text, constraints_json=context_snippets.get("constraints_json", "{}"))
+    
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    
+    try:
+        print("[INFO] Asking LLM to generate a JSON patch...")
+        response = model.generate_content(final_prompt)
+        print(f"[DEBUG] Raw LLM Response Text:\n---\n{response.text}\n---")
+        cleaned_response = response.text.strip().replace("```json", "").replace("```", "")
+        return json.loads(cleaned_response)
+    except Exception as e:
+        print(f"[ERROR] LLM patch generation failed or returned invalid JSON: {e}")
+        return {}
+
+
+# --- MODIFIED: Main Orchestrator with Triage Logic ---
+def propose_and_apply(nl_text: str, constraints_path: str, context_snippets: dict, prompts_path: str) -> dict:
+    """
+    Orchestrates a triage system:
+    1. Try to use the fast/cheap NER to build a patch.
+    2. If that fails, escalate to the powerful/expensive LLM.
+    """
+    patch = {}
+    
+    # Step 1: Extract entities with our custom NER model.
+    ner_entities = ner_parser.extract_entities(nl_text)
+    print(f"[Validator] Entities found in prompt: {ner_entities}")
+
+    if ner_entities:
+        # Step 2: Try to build the patch using our deterministic rules.
+        patch = build_patch_from_entities(ner_entities)
+
+    # Step 3: If the deterministic builder couldn't handle it, escalate to the LLM.
+    if not patch:
+        print("🤔 NER pattern not recognized or entities not found. Escalating to LLM...")
+        patch = llm_parse_to_patch(nl_text, context_snippets, prompt_path=prompts_path)
+    
+    # The old, flawed validation loop is no longer needed.
+    # The deterministic builder is trusted, and the LLM is a final fallback.
+    
+    if patch:
+        print("\n--> RESULT: A valid patch was generated.")
+        return patch
+    else:
+        print("\n--> RESULT: Failed to generate a patch from the prompt.")
+        return {}
