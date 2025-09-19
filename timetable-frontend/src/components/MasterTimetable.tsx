@@ -3,13 +3,19 @@ import axios from "axios";
 
 export default function MasterTimetable() {
   const [records, setRecords] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   async function fetchMaster() {
+    setLoading(true);
+    setError("");
     try {
       const res = await axios.get("http://localhost:5000/master");
       setRecords(res.data.master_timetable || []);
     } catch (err) {
-      alert("Failed to fetch master timetable. Did you run /generate?");
+      setError("Failed to fetch master timetable. Did you run /generate?");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -17,10 +23,17 @@ export default function MasterTimetable() {
     <div className="space-y-4">
       <button
         onClick={fetchMaster}
-        className="bg-purple-600 text-white px-4 py-2 rounded-lg"
+        disabled={loading}
+        className="bg-purple-600 text-white px-4 py-2 rounded-lg disabled:opacity-50"
       >
-        Load Master Timetable
+        {loading ? "Loading..." : "Load Master Timetable"}
       </button>
+
+      {error && <div className="text-red-600">{error}</div>}
+
+      {!loading && records.length === 0 && !error && (
+        <div className="text-gray-500">No timetable loaded yet.</div>
+      )}
 
       {records.length > 0 && (
         <table className="w-full border-collapse border text-sm">
