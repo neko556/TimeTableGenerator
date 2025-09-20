@@ -41,7 +41,6 @@ function App() {
   return (
     <div
       className="min-h-screen flex flex-col items-center bg-cover bg-center relative"
-      style={{ backgroundImage: "url('/bg.png')" }}
     >
       <AnimatePresence mode="wait">
         {!generated ? (

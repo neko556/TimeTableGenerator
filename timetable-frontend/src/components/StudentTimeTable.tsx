@@ -11,7 +11,6 @@ type TimetableEntry = {
   "Time Slot"?: string;
 };
 
-// fixed weekday order (always show these rows)
 const DAY_ORDER = [
   "Monday",
   "Tuesday",
@@ -22,10 +21,8 @@ const DAY_ORDER = [
   "Sunday",
 ];
 
-// convert "HH:MM-..." to minutes (for sorting)
 function toMinutes(slot: string) {
   if (!slot) return 0;
-  // accept both hyphen "-" and en-dash "–"
   const sep = slot.includes("-") ? "-" : slot.includes("–") ? "–" : "-";
   const start = slot.split(sep)[0].trim();
   const match = start.match(/^(\d{1,2}):(\d{2})/);
@@ -34,10 +31,8 @@ function toMinutes(slot: string) {
   return parseInt(hh, 10) * 60 + parseInt(mm, 10);
 }
 
-// sanitize "Monday_10:00-11:00" -> "10:00-11:00"
 function sanitizeSlot(raw: string | undefined) {
   if (!raw) return "";
-  // if it contains an underscore and starts with a weekday, drop the prefix
   const parts = raw.split("_");
   if (parts.length >= 2 && DAY_ORDER.includes(parts[0])) {
     return parts.slice(1).join("_");
@@ -54,30 +49,28 @@ export default function StudentTimetable({
 }) {
   if (!timetable || timetable.length === 0) {
     return (
-      <p className="text-gray-600">No classes found for student {studentId}.</p>
+      <p className="text-gray-600 text-center py-6">
+        No classes found for student <span className="font-semibold">{studentId}</span>.
+      </p>
     );
   }
 
-  // === Build unique, sorted timeSlots (top row) ===
   const timeSlotsSet = new Set<string>();
   timetable.forEach((t) => {
     const s = sanitizeSlot(t["Time Slot"] ?? t["Time"]);
     if (s) timeSlotsSet.add(s);
   });
 
-  const timeSlots = Array.from(timeSlotsSet).sort((a, b) =>
-    toMinutes(a) - toMinutes(b)
-  );
+  const timeSlots = Array.from(timeSlotsSet).sort((a, b) => toMinutes(a) - toMinutes(b));
 
   if (timeSlots.length === 0) {
     return (
-      <p className="text-gray-600">
+      <p className="text-gray-600 text-center py-6">
         No time slots available in the timetable data for {studentId}.
       </p>
     );
   }
 
-  // === Build grid: timeSlot -> day -> entry ===
   const grid: Record<string, Record<string, TimetableEntry | null>> = {};
   timeSlots.forEach((slot) => {
     grid[slot] = {};
@@ -90,33 +83,39 @@ export default function StudentTimetable({
     const slot = sanitizeSlot(entry["Time Slot"] ?? entry["Time"]);
     if (!slot) return;
     const day = entry.Day;
-    if (!DAY_ORDER.includes(day)) return; // ignore unknown day names
-    // if multiple entries map to same (slot,day) we'll keep the last one — adjust if you want merging
+    if (!DAY_ORDER.includes(day)) return;
     grid[slot][day] = entry;
   });
 
-  // === Render ===
   return (
     <div className="space-y-6">
-      <h2 className="text-xl font-bold">📅 Timetable for {studentId}</h2>
+      <h2 className="text-2xl font-bold text-center">
+        📅 Timetable for <span className="text-blue-600">{studentId}</span>
+      </h2>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse border text-sm text-center">
-          <thead className="bg-gray-100">
+      <div className="overflow-x-auto rounded-lg shadow-lg">
+        <table className="w-full border-collapse text-sm">
+          <thead className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white sticky top-0">
             <tr>
-              <th className="border px-3 py-2">Day</th>
+              <th className="px-4 py-3 text-left">Day</th>
               {timeSlots.map((slot) => (
-                <th key={slot} className="border px-3 py-2 whitespace-nowrap">
+                <th
+                  key={slot}
+                  className="px-4 py-3 text-center whitespace-nowrap"
+                >
                   {slot}
                 </th>
               ))}
             </tr>
           </thead>
 
-          <tbody>
+          <tbody className="bg-white">
             {DAY_ORDER.map((day) => (
-              <tr key={day}>
-                <td className="border px-3 py-2 font-semibold bg-gray-50">
+              <tr
+                key={day}
+                className="hover:bg-gray-50 transition-colors duration-200"
+              >
+                <td className="px-4 py-3 font-semibold text-gray-700 bg-gray-50 sticky left-0">
                   {day}
                 </td>
 
@@ -125,11 +124,13 @@ export default function StudentTimetable({
                   return (
                     <td
                       key={day + "|" + slot}
-                      className="border px-3 py-2 align-top hover:bg-gray-50"
+                      className="px-3 py-3 text-center"
                     >
                       {entry ? (
-                        <div className="space-y-1">
-                          <div className="font-medium">{entry["Course ID"]}</div>
+                        <div className="p-2 rounded-lg shadow-sm bg-blue-50 border border-blue-100 hover:bg-blue-100 transition">
+                          <div className="font-medium text-blue-700">
+                            {entry["Course ID"]}
+                          </div>
                           <div className="text-xs text-gray-600">
                             {entry["Faculty ID"]}
                           </div>
